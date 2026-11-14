@@ -1,0 +1,13 @@
+build/
+*.log
+*.map
+*.obj
+*.pdb
+*.ilk
+*.user
+.vs/
+*.suo
+keyarray.txt
+dist/Ickza.ini
+dist/trigger.ini
+dist/friends.txt

@@ -1,0 +1,201 @@
+6778.6 2321.8 Capital Chernogorsk
+11339.8 14391.0 Capital Novodmitrovsk
+6115.9 3256.4 City Novoselki
+6754.5 3595.3 City Dubovo
+5701.2 2556.1 City Vysotovo
+2796.0 5166.0 City Zelenogorsk
+12372.4 9761.0 City Berezino
+10286.7 1992.8 City Elektrozavodsk
+3477.2 12931.2 City Novaya Petrovka
+9524.0 8945.0 City Gorka
+13487.7 6225.9 City Solnechny
+6114.0 7849.0 City Stary Sobor
+3909.8 9019.6 City Vybor
+8168.5 12573.6 City Severograd
+3316.4 4071.0 Village Bor
+13989.7 13263.8 City Svetloyarsk
+11203.2 12340.8 City Krasnostav
+12158.5 13770.2 City Chernaya Polyana
+10794.0 8160.0 City Polyana
+12768.0 4384.0 Village Tulga
+11333.8 5421.4 Village Msta
+10212.5 5385.0 Village Staroye
+9728.6 6567.3 Village Shakovka
+11285.2 6633.6 Village Dolina
+12250.0 7253.0 Village Orlovets
+7123.6 7774.6 Village Novy Sobor
+5300.7 8645.9 Village Kabanino
+7650.4 5096.5 Village Mogilevka
+5894.0 4780.0 Village Nadezhdino
+8445.0 6579.0 Village Guglovo
+12170.0 3458.0 Village Kamyshovo
+9197.0 3873.0 Village Pusta
+10324.3 9888.2 Village Dubrovka
+9926.8 10468.9 Village Vyshnaya Dubrovka (Verkhnaya Dubrovka)
+12329.3 10771.0 Village Khelm
+13402.0 12898.0 Village Olsha
+8644.8 11934.1 Village Gvozdno
+5980.0 10257.0 Village Grishino
+4802.0 6748.0 Village Rogovo
+4445.0 6322.0 Village Pogorevka
+3137.9 7890.9 Village Pustoshka
+4402.0 4736.0 Village Kozlovka
+12700.6 14691.3 Village Karmanovka
+4527.6 2465.3 Village Balota
+3702.0 2440.0 Village Komarovo
+1981.0 2207.0 Village Kamenka
+2048.0 7258.0 Village Myshkino
+1694.0 3858.6 Village Pavlovo
+2801.0 10029.0 Village Lopatino
+6629.0 6051.0 Village Vyshnoye
+7760.0 3336.0 Village Prigorodki
+3374.0 4861.0 Village Drozhino
+2556.0 6307.0 Village Sosnovka
+12824.9 8097.7 Village Nizhnoe (Nizhnee)
+5015.0 5607.0 Village Pulkovo
+15020.0 13905.0 Village Berezhki
+13630.0 14146.0 Village Turovo
+14166.0 14968.0 Village Belaya Polyana
+12996.0 15066.0 Village Dobroye
+9286.0 14677.0 Village Nagornoye
+9493.5 13875.3 Village Svergino
+6195.9 12761.8 Village Ratnoye
+6748.7 14430.0 Village Kamensk
+6411.4 15030.0 Village Krasnoye
+4987.9 14993.0 Village Stary Yar
+5955.7 13558.0 Village Polesovo
+3441.6 14799.5 Village Tisy
+2913.7 12366.4 Village Topolniki
+5214.0 12792.0 Village Zaprudnoye
+1538.3 11904.6 Village Sinystok
+2263.0 11103.0 Village Vavilovo
+8300.0 6054.0 Village Kumyrna
+7448.0 13406.0 Village Kalinovka
+1453.6 8870.9 Village Bogatyrka
+638.0 11667.0 Local Svyatoy Roman Ski Resort
+357.0 11142.0 Local Skvsch Biathlon Arena
+577.3 5317.4 Village Zvir
+1256.9 9993.3 Village Zabolotye
+1102.7 8798.3 Local Galkino
+8509.7 13918.6 Camp Arsenovo
+7017.6 4365.2 Camp Stroytel
+8177.6 10980.3 Camp Romashka
+10271.7 3558.2 Camp Kometa
+11437.0 10695.0 Camp Druzbha
+7280.0 7014.4 Camp Nadezhda
+11155.8 7074.1 Camp Youth Pioneer
+3199.6 6174.9 Camp Proud Chernarus
+14856.5 14571.0 Camp Shkolnik
+3703.4 14876.4 Camp Pobeda
+1035.4 6677.4 Camp Metalurg
+3767.2 6010.5 Hill Zelenaya Gora
+4618.0 7821.0 Local Dichina
+9251.0 11360.0 Local Novy Lug
+6919.0 8995.0 Local Starye Luga
+6591.6 3400.0 Hill Vysota
+7871.5 3869.1 Hill Kopyto
+13115.1 11900.0 Local Grubye Skaly
+9031.0 7803.0 Local Cherny Les
+8143.4 9159.7 Hill Altar
+8080.0 9341.7 Local Radio Zenit
+8850.2 2880.5 Hill Pik Kozlova
+10890.0 5665.0 Local Pustoy Khrebet
+4178.3 11771.2 Hill Bashnya
+4440.2 8070.5 Hill Veresnik
+3368.5 5296.9 Hill Kurgan
+4912.9 5063.5 Hill Kustryk
+3892.7 4200.6 Hill Vetryanaya Gora
+6903.8 4919.7 Hill Kalmyk
+6420.3 6570.7 Hill Pop Ivan
+2842.9 4014.8 Hill Erbenka
+8122.8 7815.5 Local Lesnoykhrebet
+8940.2 4380.5 Hill Vysokiy Kamen
+10552.9 3061.0 Hill Dobry
+10153.1 6208.5 Hill Baranchik
+10897.7 7575.6 Hill Malinovka
+11107.9 8474.8 Hill Dubina
+11473.5 11315.4 Hill Klen
+10280.8 12053.9 Hill Chernaya Gora
+10179.0 11998.0 Ruin Zolotar
+10792.7 12829.5 Hill Ostry
+12975.7 12775.2 Hill Olsha
+1221.5 2111.9 Marine Tikhiy Zaliv
+5735.5 1918.9 Marine Mutnyi Zaliv
+7599.1 2486.6 Marine Cherny Zaliv
+11227.0 2989.8 Marine Zeleny Zaliv
+13385.9 3613.9 Marine Skalisty Proliv
+12989.3 8515.8 Marine Nizhniy Zaliv
+14328.4 13136.7 Marine Zaliv Guba
+13931.7 11288.6 Local Rify
+13248.0 11572.0 Marine Ivovoye Ozero
+13381.0 12002.0 Marine Chernoye Ozero
+10231.3 3691.1 Marine Plotina Topolka
+9928.3 13874.6 Marine Plotina Pobeda
+1150.8 6432.5 Marine Plotina Tishina
+6777.6 4492.4 Marine Ozerko
+6611.0 9308.6 Marine Prud
+6883.2 11501.3 Ruin Chortovzamok
+6574.3 5573.9 Ruin Zub
+11267.2 4293.0 Ruin Rog
+3318.1 15250.5 Local Grozovy Pereval
+2687.4 6590.3 Local Sosnovy Pereval
+9822.2 6088.8 Local Pereval Oreshka
+14674.2 14089.3 Local Turovskiypereval
+12764.5 5412.2 Local Tri Doliny
+10404.0 14793.2 Local Grozovye Doly
+9282.6 13476.7 Ruin Klyuch
+6722.5 14050.4 Hill Lysaya Gora
+1692.6 14821.6 Marine Glubokoye Ozero
+5758.0 14486.0 Local Skalka
+785.1 14398.8 Local Vidy
+331.2 12983.0 Hill Tumanny Verkh
+5340.7 11380.0 Local Adamovka
+3559.3 9422.3 Hill Shishok
+13715.5 3118.8 Village Skalisty
+2816.6 1278.0 Ruin Storozh
+8286.1 2405.6 Local Mys Golova
+11191.0 2443.0 Local Drakon
+11581.2 3213.2 Local Otmel
+13578.2 3976.8 Local Mys Krutoy
+8890.5 5672.6 Hill Tokarnya
+2655.7 2264.6 Hill Ostrog
+2789.0 3386.0 Local Maryanka
+1004.5 4242.9 Local Polonina
+3346.5 11292.1 Local Kalinka
+1812.0 6200.0 Hill Kikimora
+714.6 6520.4 Hill Bolshoy Kotel
+134.0 7570.0 Hill Simurg
+320.3 2719.3 Hill Volchiypik
+1493.0 9270.3 Ruin Krona
+301.0 9478.0 Local Tri Kresta
+744.5 8647.9 Local Rostoki
+597.0 5990.0 Marine Orlye Ozero
+7849.7 6480.2 Local Makosh
+10862.7 11585.5 Local Klenovyipereval
+11446.2 13606.9 Local Zmeinykhrebet
+12001.0 14813.0 Hill Sokol
+14880.6 13671.8 Local Krutye Skaly
+7058.0 12023.6 Local Bogat
+3298.3 10330.9 Local Dubnik
+12722.2 7504.0 Hill Viselitsa
+6581.0 8590.0 Hill Dazhbog
+4414.9 9103.0 Marine Verbnik
+9641.0 13236.0 Local Medvezhi Lugi
+13517.9 3311.2 Ruin Voron
+7446.9 9097.2 Ruin Gnomov Zamok
+7383.0 9320.0 Marine Glaza
+8565.3 13418.7 Local Karer Krasnaya Zarya
+4281.0 7380.0 Local Matveyevo
+5873.7 6883.2 Local Kotka
+3932.6 14599.5 Local Chernye Skaly
+84.8 11901.2 Hill Svyatoy Roman
+1660.7 7415.7 Hill Koman
+12323.8 4553.1 Hill Mayak
+4497.0 8291.0 Local Military Base
+1570.0 14069.0 Local Military Base
+7838.8 14704.8 Local Military Base
+2410.4 5133.7 Local Military Base
+2016.0 3408.0 Local Military Base
+5082.0 2376.3 Local Airfield
+12100.7 12573.9 Local Airfield
+4428.0 10179.0 Local North-West Airfield
