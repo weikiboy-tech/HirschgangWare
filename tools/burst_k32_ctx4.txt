@@ -1,0 +1,12 @@
+keyprobe mode=burst port=COM3 dll=C:\Users\Admin\Documents\Ickza-DMA\build\dma module=win32k.sys
+[ok] loaded C:\Users\Admin\Documents\Ickza-DMA\build\dma\vmm.dll
+[ok] VMM initialized
+[box] reply: km.MAKCU>>> 
+processes: 353
+=== BURST auto (kein Mensch) ctx=0x4 win32k.sys size=0xC7000 toggles=5 ===
+idle-stabilität: 815104 von 815104 stabil (0 instabil)
+LMB(VK1): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 10 Messpunkten: 
+RMB(VK2): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 10 Messpunkten: 
+MMB(VK4): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 10 Messpunkten: 
+kein Layout-Match -> Adresse in diesem Modul/Ctx nicht gefunden
+done.

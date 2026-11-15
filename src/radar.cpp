@@ -1191,6 +1191,22 @@ bool textField(const char* id, std::string& v) {
     return false;
 }
 
+// VKs whose scan code is extended (E0 prefix); GetKeyNameText needs bit 24 set for these.
+static bool vkExtended(int vk) {
+    switch (vk) {
+        case VK_RCONTROL: case VK_RMENU: case VK_INSERT: case VK_DELETE: case VK_HOME: case VK_END:
+        case VK_PRIOR: case VK_NEXT: case VK_LEFT: case VK_RIGHT: case VK_UP: case VK_DOWN:
+        case VK_NUMLOCK: case VK_DIVIDE: case VK_SNAPSHOT: case VK_APPS: case VK_LWIN: case VK_RWIN:
+        case VK_VOLUME_MUTE: case VK_VOLUME_DOWN: case VK_VOLUME_UP:
+        case VK_MEDIA_NEXT_TRACK: case VK_MEDIA_PREV_TRACK: case VK_MEDIA_STOP: case VK_MEDIA_PLAY_PAUSE:
+        case VK_BROWSER_BACK: case VK_BROWSER_FORWARD: case VK_BROWSER_REFRESH: case VK_BROWSER_STOP:
+        case VK_BROWSER_SEARCH: case VK_BROWSER_FAVORITES: case VK_BROWSER_HOME:
+            return true;
+        default:
+            return false;
+    }
+}
+
 void keyLabel(char* out, size_t n) {
     const int k = trigger::cfg().key;
     if (k >= 1 && k <= 5) {
@@ -1203,11 +1219,19 @@ void keyLabel(char* out, size_t n) {
         return;
     }
     char nm[48] = {};
-    const UINT sc = MapVirtualKeyA((UINT)k, MAPVK_VK_TO_CHAR);
-    if (sc && GetKeyNameTextA(LONG(sc) << 16, nm, (int)sizeof nm) > 0 && nm[0])
-        std::snprintf(out, n, "%s (0x%02X)", nm, k);
-    else
-        std::snprintf(out, n, "code 0x%02X (%d)", k, k);
+    // GetKeyNameText expects a SCAN CODE in bits 16-23 (bit 24 = extended key), NOT a character code.
+    // MAPVK_VK_TO_CHAR (old bug) returned e.g. 0x45 for VK_E -> GetKeyNameText read scan code 0x45 = "Pause".
+    UINT sc = MapVirtualKeyA((UINT)k, MAPVK_VK_TO_VSC_EX);
+    if (k == VK_PAUSE) sc = 0x45;  // pause is E1 1D 45; the name table wants 0x45 (no extended bit)
+    if (sc) {
+        LONG lp = LONG(sc & 0xFF) << 16;
+        if ((sc >> 8) == 0xE0 || vkExtended(k)) lp |= 1L << 24;
+        if (GetKeyNameTextA(lp, nm, (int)sizeof nm) > 0 && nm[0]) {
+            std::snprintf(out, n, "%s (0x%02X)", nm, k);
+            return;
+        }
+    }
+    std::snprintf(out, n, "code 0x%02X (%d)", k, k);
 }
 
 void drawTriggerSection(bool& ch) {

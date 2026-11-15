@@ -1,0 +1,7 @@
+keyprobe mode=burst port=COM3 dll=C:\Users\Admin\Documents\Ickza-DMA\build\dma module=win32k.sys
+[ok] loaded C:\Users\Admin\Documents\Ickza-DMA\build\dma\vmm.dll
+[ok] VMM initialized
+[box] reply: km.MAKCU>>> 
+processes: 361
+burst: no base for win32k.sys
+done.

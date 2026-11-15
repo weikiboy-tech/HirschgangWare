@@ -6,6 +6,9 @@
 //   find   = automatic read-only discriminator: idle-stability vs. box pulses (no human needed)
 //   phases = human-guided read-only E/W test (beeps): counts beeps 1..6 = idle/E/release/W/release/move
 //   e      = SUPER SIMPLE: only key E by sound - HIGH beep = press+HOLD E, LOW beep = release (3 rounds)
+//   e2     = 1 sound, then tap E quickly several times; matches "2 values + many changes" (no human timing)
+//   burst  = AUTOMATIC: box toggles LMB/RMB/MMB; pattern+geometry finds array base & layout (no human at all)
+//   chain  = follow our session-slot fallback chain (csrss -> win32ksgd/win32k +0x3110) and burst a window there
 //
 // The DMA card + COM port must be free (no Ickza.exe / MemProcFS running).
 #include <windows.h>
@@ -1132,6 +1135,143 @@ static void doTapE(DWORD ctx, const char* module, int rounds) {
     }
 }
 
+// ------------------------------------------------------------------ BURST: automatic structure finder (no human timing)
+// Box toggles LMB/RMB/MMB (VKs 1/2/4 in the same array). A key byte shows exactly TWO values and MANY
+// transitions; counters/timestamps show many different values. Geometry (byte distances) identifies layout+base.
+static void doBurst(DWORD ctx, const char* module, ULONG64 vaOverride, size_t winOverride, int toggles) {
+    ULONG64 base = vaOverride;
+    uint32_t size = (uint32_t)(winOverride ? winOverride : 0x400000);
+    if (!base) {
+        base = modBase(ctx, module);
+        if (!base) { lg("burst: no base for %s", module); return; }
+        if (VMMDLL_Map_GetModuleFromNameU) {
+            PVMMDLL_MAP_MODULEENTRY e = nullptr;
+            if (VMMDLL_Map_GetModuleFromNameU(gVmm, ctx, module, &e, 0) && e) {
+                if (e->cbImageSize) size = e->cbImageSize;
+                VMMDLL_MemFree(e);
+            }
+        }
+    }
+    lg("=== BURST auto (kein Mensch) ctx=0x%lX %s size=0x%X toggles=%d ===", (unsigned long)ctx, module, size, toggles);
+    std::vector<uint8_t> A, B;
+    if (!readImg(ctx, base, size, A)) { lg("read A failed"); return; }
+    Sleep(250);
+    if (!readImg(ctx, base, size, B)) { lg("read B failed"); return; }
+    std::vector<uint8_t> stable(size);
+    size_t nUn = 0;
+    for (size_t i = 0; i < size; ++i) {
+        stable[i] = A[i] == B[i];
+        if (!stable[i]) ++nUn;
+    }
+    lg("idle-stabilität: %zu von %zu stabil (%zu instabil)", size - nUn, size, nUn);
+
+    static const char* pname[3] = {"LMB(VK1)", "RMB(VK2)", "MMB(VK4)"};
+    static const char* pcmd[3] = {"km.left", "km.right", "km.middle"};
+    struct Cand {
+        size_t off;
+        int trans;
+        uint8_t down;
+    };
+    std::vector<Cand> cand[3];
+    for (int p = 0; p < 3; ++p) {
+        char dn[32], up[32];
+        std::snprintf(dn, sizeof dn, "%s(1)\r\n", pcmd[p]);
+        std::snprintf(up, sizeof up, "%s(0)\r\n", pcmd[p]);
+        std::vector<uint16_t> trans(size, 0);
+        std::vector<uint8_t> a2(size, 0), down(size, 0), cur(size);
+        std::vector<uint8_t> last(size);
+        std::memcpy(last.data(), A.data(), size);
+        int seen = 0;
+        for (int t = 0; t < toggles; ++t) {
+            gBox.send(dn);
+            Sleep(90);
+            if (readImg(ctx, base, size, cur)) {
+                ++seen;
+                for (size_t i = 0; i < size; ++i)
+                    if (cur[i] != last[i]) {
+                        if (trans[i] < 60000) ++trans[i];
+                        if (down[i] == A[i]) down[i] = cur[i];      // remember the pressed value
+                        if (a2[i] == 0 && cur[i] != A[i] && cur[i] != down[i]) a2[i] = cur[i];  // 3rd value?
+                        last[i] = cur[i];
+                    }
+            }
+            gBox.send(up);
+            Sleep(90);
+            if (readImg(ctx, base, size, cur)) {
+                ++seen;
+                for (size_t i = 0; i < size; ++i)
+                    if (cur[i] != last[i]) {
+                        if (trans[i] < 60000) ++trans[i];
+                        if (down[i] == A[i]) down[i] = cur[i];
+                        if (a2[i] == 0 && cur[i] != A[i] && cur[i] != down[i]) a2[i] = cur[i];
+                        last[i] = cur[i];
+                    }
+            }
+        }
+        for (size_t i = 0; i < size; ++i)
+            if (stable[i] && trans[i] >= toggles * 2 - 1 && down[i] != A[i] && last[i] == A[i])
+                cand[p].push_back({i, trans[i], down[i]});
+        std::sort(cand[p].begin(), cand[p].end(), [](const Cand& x, const Cand& y) { return x.trans > y.trans; });
+        std::string s;
+        for (size_t k = 0; k < cand[p].size() && k < 8; ++k) {
+            char t[48];
+            std::snprintf(t, sizeof t, "+0x%zX(w=%d,%02X>%02X) ", cand[p][k].off, cand[p][k].trans, A[cand[p][k].off], cand[p][k].down);
+            s += t;
+        }
+        lg("%s: %zu Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach %d Messpunkten: %s", pname[p], cand[p].size(), seen, s.c_str());
+    }
+
+    bool any = false;
+    for (const LayoutF& L : LAYF) {
+        for (const Cand& c1 : cand[0]) {
+            const int b1 = L.bitfn(0x01);
+            if (!((c1.down >> b1) & 1)) continue;
+            const int64_t st = (int64_t)c1.off - L.bytefn(0x01);
+            bool ok = true;
+            for (int p = 1; p < 3 && ok; ++p) {
+                const int vk = p == 1 ? 0x02 : 0x04;
+                const int bp = L.bitfn(vk);
+                bool found = false;
+                for (const Cand& c : cand[p])
+                    if ((int64_t)c.off - L.bytefn(vk) == st && ((c.down >> bp) & 1)) {
+                        found = true;
+                        break;
+                    }
+                if (!found) ok = false;
+            }
+            if (ok) {
+                lg("MATCH layout=%s  arrayBase=0x%llX  E-Byte=+0x%llX  (%s)", L.name, (unsigned long long)(base + st),
+                   (unsigned long long)(st + L.bytefn(0x45)), L.map);
+                any = true;
+            }
+        }
+    }
+    if (!any) lg("kein Layout-Match -> Adresse in diesem Modul/Ctx nicht gefunden");
+}
+
+static bool kernelVa(ULONG64 a) { return a >= 0xFFFF000000000000ull; }
+
+// Follow our project's own session-slot fallback chain (csrss -> win32ksgd.sys +0x3110 -> ptr -> ptr -> ptr)
+// and BURST a window at the final pointer, so a wrong tail offset no longer matters.
+static void doChain(const std::vector<Proc>& procs) {
+    const char* mods[2] = {"win32ksgd.sys", "win32k.sys"};
+    lg("=== CHAIN read-only: Session-Slot-Kette (unsere Code-Werte +0x3110 / +0x3690) ===");
+    for (const auto& p : procs) {
+        if (p.name != "csrss.exe") continue;
+        for (const char* m : mods) {
+            const ULONG64 b = modBase(p.pid, m);
+            if (!b) { lg("  pid=0x%lX %s: kein Base", (unsigned long)p.pid, m); continue; }
+            ULONG64 q1 = 0, q2 = 0, q3 = 0;
+            if (!rd(p.pid, b + 0x3110, &q1, 8) || !kernelVa(q1)) { lg("  pid=0x%lX %s base=0x%llX +0x3110 -> 0x%llX (kein Kernelzeiger)", (unsigned long)p.pid, m, (unsigned long long)b, (unsigned long long)q1); continue; }
+            if (!rd(p.pid, q1, &q2, 8) || !kernelVa(q2)) { lg("  pid=0x%lX %s q1=0x%llX -> 0x%llX (kein Kernelzeiger)", (unsigned long)p.pid, m, (unsigned long long)q1, (unsigned long long)q2); continue; }
+            if (!rd(p.pid, q2, &q3, 8) || !kernelVa(q3)) { lg("  pid=0x%lX %s q2=0x%llX -> 0x%llX (kein Kernelzeiger)", (unsigned long)p.pid, m, (unsigned long long)q2, (unsigned long long)q3); continue; }
+            lg("  KETTE OK pid=0x%lX %s: base=0x%llX -> 0x%llX -> 0x%llX -> 0x%llX ; unser Array-Tail waere 0x%llX", (unsigned long)p.pid, m,
+               (unsigned long long)b, (unsigned long long)q1, (unsigned long long)q2, (unsigned long long)q3, (unsigned long long)(q3 + 0x3690));
+            doBurst(p.pid, "", q3, 0x20000, 3);
+        }
+    }
+}
+
 int main(int argc, char** argv) {
     std::string mode = "probe", port = "COM3", dllDir = exeDir(), module = "win32kbase.sys";
     DWORD onlyCtx = (DWORD)-1;
@@ -1141,7 +1281,9 @@ int main(int argc, char** argv) {
     int phaseStep = 60;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
-        if (a == "probe" || a == "scan" || a == "scanall" || a == "env" || a == "ekey" || a == "find" || a == "phases" || a == "e") mode = a;
+        if (a == "probe" || a == "scan" || a == "scanall" || a == "env" || a == "ekey" || a == "find" || a == "phases" || a == "e" || a == "e2" ||
+            a == "burst" || a == "chain")
+            mode = a;
         else if (a == "--va" && i + 1 < argc) phaseVa = strtoull(argv[++i], nullptr, 0);
         else if (a == "--win" && i + 1 < argc) phaseWin = (size_t)strtoul(argv[++i], nullptr, 0);
         else if (a == "--step" && i + 1 < argc) phaseStep = atoi(argv[++i]);
@@ -1216,6 +1358,21 @@ int main(int argc, char** argv) {
             scanOne(4, module.c_str());
         else
             scanOne(onlyCtx, module.c_str());
+    } else if (mode == "e2") {
+        doTapE(onlyCtx == (DWORD)-1 ? 0x80000548u : onlyCtx, module.c_str(), rounds < 2 ? 3 : rounds);
+    } else if (mode == "burst") {
+        DWORD c = onlyCtx;
+        if (c == (DWORD)-1) {
+            for (const auto& p : procs)
+                if (p.name == "winlogon.exe") {
+                    c = p.pid;
+                    break;
+                }
+            if (c == (DWORD)-1) c = 4;
+        }
+        doBurst(c, module.c_str(), 0, 0, rounds < 5 ? 5 : rounds);
+    } else if (mode == "chain") {
+        doChain(procs);
     } else if (mode == "e") {
         doFindE(onlyCtx == (DWORD)-1 ? 0x80000548u : onlyCtx, module.c_str(), rounds < 1 ? 3 : rounds);
     } else if (mode == "phases") {

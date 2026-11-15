@@ -90,4 +90,31 @@ Kern: **Die Box erzeugt die Referenzereignisse** — LMB/RMB/MMB sind VKs **1/2/
 * Live-Zuordnung VK/Funktion (nur die Formel stimmt mit der Referenz überein)
 * keine Erfolgsaussage ohne T1–T4.
 
+## 9. Messungen 2026-11-15 (T1 automatisch, kein Mensch)
+
+Neu in `tools/keyprobe.cpp`: `burst` (Box toggelt LMB/RMB/MMB; Kriterium „genau 2 Werte + ≥4 Wechsel + kehrt zurück", idle-stabil) und `chain` (verfolgt unsere Session-Slot-Altwerte und burstet ein Fenster).
+
+```
+=== BURST auto ctx=0x4 win32kbase.sys size=0x345000 ===
+idle-stabilität: 3428347 von 3428352 stabil (5 instabil)
+LMB(VK1): 0 Kandidaten | RMB(VK2): 0 Kandidaten | MMB(VK4): 0 Kandidaten
+kein Layout-Match
+=== BURST auto ctx=0x4 win32k.sys size=0xC7000 ===
+idle-stabilität: 815104 von 815104 stabil (0 instabil)
+LMB/RMB/MMB: je 0 Kandidaten -> kein Layout-Match
+=== CHAIN (unsere Altwerte +0x3110/+0x3690) ===
+pid=0x434 win32ksgd.sys: kein Base            (<- auf 24H2 existiert der Pfad nicht mehr)
+pid=0x434 win32k.sys base=0xFFFFF80741360000 +0x3110 -> 0x12F83E828EC8348  (kein Kernelzeiger -> Alt-Offset falsch)
+```
+
+**Belege/Ergebnisse:**
+1. Die Trefferregionen aus früheren Läufen (ms-Zähler, „last input"-Feld) liegen **nicht** im Kandidatenraster → bestätigt: Array liegt **nicht als Bild-Daten** in `win32kbase.sys`/`win32k.sys`.
+2. `ctx = winlogon(plain)` hat **kein** `win32k.sys`-Modul → der von der Referenz genannte Proxy muss als **wininit/session-0** oder über den Slot-Zeiger genutzt werden.
+3. Unsere Fallback-Kette ist der **22H2-Stand** (win32ksgd.sys + 0x3110/+0x3690) und auf 24H2 ungültig.
+4. Damit ist **P2 (Signatur-Locator wie dokumentiert + Session-Slot-Kette + Fenster-Burst)** der nächste belegte Schritt; kein „neuer blinder Scan".
+
+### P1 — erledigt und offline verifiziert
+`tools/label_test.exe`: 12 Fälle, **0 Fehler**: `vk=0x45 -> "E (0x45)"` (vorher „PAUSE"), `0x13 -> "PAUSE"`, Pfeile/Einfg nicht mehr als Numpad-Namen; deutsche Systemnamen akzeptiert. `src/radar.cpp` nutzt jetzt `MAPVK_VK_TO_VSC_EX` + Extended-Bit + Pause-Sonderfall.
+
+
 
