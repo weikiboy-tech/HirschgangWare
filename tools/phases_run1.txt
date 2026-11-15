@@ -1,0 +1,12 @@
+keyprobe mode=phases port=COM3 dll=C:\Users\Admin\Documents\Ickza-DMA\build\dma module=win32kbase.sys
+[ok] loaded C:\Users\Admin\Documents\Ickza-DMA\build\dma\vmm.dll
+[ok] VMM initialized
+[box] reply: km.MAKCU>>> 
+processes: 337
+=== PHASES read-only (BOX untouched) ctx=0x80000548 win32kbase.sys window=0xFFFFF8073EC7D7C0+0x2000 step=60ms ===
+=== BEEPS ZAEHLEN: 1=idle | 2=E HALTEN | 3=loslassen | 4=W HALTEN | 5=loslassen | 6=MAUS BEWEGEN ===
+candidates: 0 for E, 0 for W (changed only in the press phase, not in idle/release/move)
+  E offsets: 
+  W offsets: 
+VERDICT: no reaction in this window (array not here - or the keys were not pressed)
+done.

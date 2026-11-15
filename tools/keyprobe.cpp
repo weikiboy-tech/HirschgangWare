@@ -3,7 +3,8 @@
 //
 // Build: tools\build_keyprobe.bat   (produces tools\keyprobe.exe)
 // Usage: keyprobe.exe [probe|scan|scanall|env|ekey|find] [--dll DIR] [--port COM3] [--module win32kbase.sys] [--ctx N]
-//   find = automatic read-only discriminator: idle-stability vs. box pulses (no human needed)
+//   find   = automatic read-only discriminator: idle-stability vs. box pulses (no human needed)
+//   phases = human-guided read-only E/W test (beeps): counts beeps 1..6 = idle/E/release/W/release/move
 //
 // The DMA card + COM port must be free (no Ickza.exe / MemProcFS running).
 #include <windows.h>
@@ -814,13 +815,101 @@ static void doFind(DWORD ctx, const char* module) {
     }
 }
 
+// ------------------------------------------------------------------ human-guided read-only phases (E vs W)
+// Beeps = clock: 1=idle, 2=HOLD E, 3=release, 4=HOLD W, 5=release, 6=MOVE MOUSE.
+// Only offsets that change during a press phase and NOT during idle/release/move are candidates.
+static void doPhases(DWORD ctx, const char* module, ULONG64 va, size_t win, int stepMs) {
+    const ULONG64 base = modBase(ctx, module);
+    if (!base) { lg("phases: no base for %s", module); return; }
+    if (!va) {
+        ULONG64 rva = 0;
+        std::string mod;
+        if (!pdbRva(ctx, base, "gafAsyncKeyState", rva, mod)) { lg("phases: no pdb rva and no --va"); return; }
+        va = base + rva;
+    }
+    const ULONG64 start = (va - win / 2) & ~(ULONG64)0xF;
+    lg("=== PHASES read-only (BOX untouched) ctx=0x%lX %s window=0x%llX+0x%zX step=%dms ===", (unsigned long)ctx, module,
+       (unsigned long long)start, win, stepMs);
+    lg("=== BEEPS ZAEHLEN: 1=idle | 2=E HALTEN | 3=loslassen | 4=W HALTEN | 5=loslassen | 6=MAUS BEWEGEN ===");
+    const int nph = 6;
+    const int dur[nph] = {2500, 3500, 2500, 3500, 2500, 3500};
+    std::vector<uint8_t> snap(win), cur(win);
+    std::vector<unsigned> phaseMask(win, 0), bitMask(win, 0);
+    for (int p = 0; p < nph; ++p) {
+        for (int b = 0; b <= p; ++b) {
+            Beep(900, 80);
+            Sleep(110);
+        }
+        Sleep(200);
+        if (!rd(ctx, start, snap.data(), (DWORD)win, true)) { lg("phase %d read failed", p + 1); return; }
+        const ULONGLONG t0 = GetTickCount64();
+        while (GetTickCount64() - t0 < (ULONGLONG)dur[p]) {
+            if (rd(ctx, start, cur.data(), (DWORD)win, true)) {
+                for (size_t i = 0; i < win; ++i) {
+                    const uint8_t d = (uint8_t)(snap[i] ^ cur[i]);
+                    if (d) {
+                        phaseMask[i] |= (1u << p);
+                        bitMask[i] |= d;
+                    }
+                }
+            }
+            Sleep(stepMs);
+        }
+    }
+    Beep(600, 400);
+    std::vector<size_t> ce, cw;
+    for (size_t i = 0; i < win; ++i) {
+        const unsigned m = phaseMask[i];
+        if (!m) continue;
+        const unsigned noise = (1u << 0) | (1u << 2) | (1u << 4) | (1u << 5);  // idle / release / mouse move
+        if ((m & (1u << 1)) && !(m & noise)) ce.push_back(i);
+        if ((m & (1u << 3)) && !(m & noise)) cw.push_back(i);
+    }
+    lg("candidates: %zu for E, %zu for W (changed only in the press phase, not in idle/release/move)", ce.size(), cw.size());
+    {
+        std::string s;
+        for (size_t k = 0; k < ce.size() && k < 14; ++k) {
+            char t[32];
+            std::snprintf(t, sizeof t, "%zX(b%02X) ", ce[k], (unsigned)bitMask[ce[k]]);
+            s += t;
+        }
+        lg("  E offsets: %s", s.c_str());
+        s.clear();
+        for (size_t k = 0; k < cw.size() && k < 14; ++k) {
+            char t[32];
+            std::snprintf(t, sizeof t, "%zX(b%02X) ", cw[k], (unsigned)bitMask[cw[k]]);
+            s += t;
+        }
+        lg("  W offsets: %s", s.c_str());
+    }
+    if (ce.empty() && cw.empty()) lg("VERDICT: no reaction in this window (array not here - or the keys were not pressed)");
+    for (const LayoutF& L : LAYF) {
+        for (size_t a : ce) {
+            if (!(bitMask[a] & (1u << L.bitfn(0x45)))) continue;
+            for (size_t b : cw) {
+                if (!(bitMask[b] & (1u << L.bitfn(0x57)))) continue;
+                if ((int64_t)a - L.bytefn(0x45) != (int64_t)b - L.bytefn(0x57)) continue;
+                const int64_t st = (int64_t)a - L.bytefn(0x45);
+                lg("MATCH layout=%s arrayBase=0x%llX (%s) ctx=0x%lX %s", L.name, (unsigned long long)(start + st), L.map,
+                   (unsigned long)ctx, module);
+            }
+        }
+    }
+}
+
 int main(int argc, char** argv) {
     std::string mode = "probe", port = "COM3", dllDir = exeDir(), module = "win32kbase.sys";
     DWORD onlyCtx = (DWORD)-1;
     int rounds = 3, key1 = 0x45, key2 = 0x57;
+    ULONG64 phaseVa = 0;
+    size_t phaseWin = 0x2000;
+    int phaseStep = 60;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
-        if (a == "probe" || a == "scan" || a == "scanall" || a == "env" || a == "ekey" || a == "find") mode = a;
+        if (a == "probe" || a == "scan" || a == "scanall" || a == "env" || a == "ekey" || a == "find" || a == "phases") mode = a;
+        else if (a == "--va" && i + 1 < argc) phaseVa = strtoull(argv[++i], nullptr, 0);
+        else if (a == "--win" && i + 1 < argc) phaseWin = (size_t)strtoul(argv[++i], nullptr, 0);
+        else if (a == "--step" && i + 1 < argc) phaseStep = atoi(argv[++i]);
         else if (a == "--port" && i + 1 < argc) port = argv[++i];
         else if (a == "--dll" && i + 1 < argc) dllDir = argv[++i];
         else if (a == "--module" && i + 1 < argc) module = argv[++i];
@@ -892,6 +981,8 @@ int main(int argc, char** argv) {
             scanOne(4, module.c_str());
         else
             scanOne(onlyCtx, module.c_str());
+    } else if (mode == "phases") {
+        doPhases(onlyCtx == (DWORD)-1 ? 0x80000548u : onlyCtx, module.c_str(), phaseVa, phaseWin, phaseStep);
     } else if (mode == "find") {
         doFind(onlyCtx == (DWORD)-1 ? 4 : onlyCtx, module.c_str());
     } else if (mode == "env") {
