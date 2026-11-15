@@ -1,0 +1,71 @@
+keyprobe mode=slots2 port=COM3 dll=C:\Users\Admin\Documents\Ickza-DMA\build\dma module=win32kbase.sys
+[ok] loaded C:\Users\Admin\Documents\Ickza-DMA\build\dma\vmm.dll
+[ok] VMM initialized
+[box] reply: km.MAKCU>>> 
+processes: 353
+slots2: gSessionGlobalSlots @ 0xFFFFF807413E7CE0
+slots2: lese Kette in ctx=0x4E4 (csrss session>=1, user-mode Proxy laut Referenz)
+slots2: keyOff=kein keyOff-Sig-Treffer -> 0x0
+slots2: 6 Kandidatenadressen werden geprueft
+  teste 0xFFFFAE02C79FCFB0 (*(gsgs)): 38/64 != 0
+=== BURST auto (kein Mensch) ctx=0x4E4  size=0x100 toggles=3 ===
+idle-stabilität: 256 von 256 stabil (0 instabil)
+LMB(VK1): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 6 Messpunkten: 
+   nur-Diagnose (0 Bytes mit Wechseln): 
+RMB(VK2): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 6 Messpunkten: 
+   nur-Diagnose (0 Bytes mit Wechseln): 
+MMB(VK4): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 6 Messpunkten: 
+   nur-Diagnose (0 Bytes mit Wechseln): 
+kein Layout-Match -> Adresse in diesem Modul/Ctx nicht gefunden
+  teste 0xFFFFAE02C7A00640 (*(gsgs)+0x3690): 12/64 != 0
+=== BURST auto (kein Mensch) ctx=0x4E4  size=0x100 toggles=3 ===
+idle-stabilität: 256 von 256 stabil (0 instabil)
+LMB(VK1): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 6 Messpunkten: 
+   nur-Diagnose (0 Bytes mit Wechseln): 
+RMB(VK2): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 6 Messpunkten: 
+   nur-Diagnose (0 Bytes mit Wechseln): 
+MMB(VK4): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 6 Messpunkten: 
+   nur-Diagnose (0 Bytes mit Wechseln): 
+kein Layout-Match -> Adresse in diesem Modul/Ctx nicht gefunden
+  teste 0xFFFFAE02CAE852D0 (*(*(gsgs))): 62/64 != 0
+=== BURST auto (kein Mensch) ctx=0x4E4  size=0x100 toggles=3 ===
+idle-stabilität: 256 von 256 stabil (0 instabil)
+LMB(VK1): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 6 Messpunkten: 
+   nur-Diagnose (0 Bytes mit Wechseln): 
+RMB(VK2): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 6 Messpunkten: 
+   nur-Diagnose (0 Bytes mit Wechseln): 
+MMB(VK4): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 6 Messpunkten: 
+   nur-Diagnose (0 Bytes mit Wechseln): 
+kein Layout-Match -> Adresse in diesem Modul/Ctx nicht gefunden
+  teste 0xFFFFAE02CAE88960 (*(*(gsgs))+0x3690): 0/64 != 0
+=== BURST auto (kein Mensch) ctx=0x4E4  size=0x100 toggles=3 ===
+idle-stabilität: 256 von 256 stabil (0 instabil)
+LMB(VK1): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 6 Messpunkten: 
+   nur-Diagnose (0 Bytes mit Wechseln): 
+RMB(VK2): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 6 Messpunkten: 
+   nur-Diagnose (0 Bytes mit Wechseln): 
+MMB(VK4): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 6 Messpunkten: 
+   nur-Diagnose (0 Bytes mit Wechseln): 
+kein Layout-Match -> Adresse in diesem Modul/Ctx nicht gefunden
+  teste 0xFFFFAE02D2E89000 (*(gsgs[0][0])): 18/64 != 0
+=== BURST auto (kein Mensch) ctx=0x4E4  size=0x100 toggles=3 ===
+idle-stabilität: 256 von 256 stabil (0 instabil)
+LMB(VK1): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 6 Messpunkten: 
+   nur-Diagnose (0 Bytes mit Wechseln): 
+RMB(VK2): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 6 Messpunkten: 
+   nur-Diagnose (0 Bytes mit Wechseln): 
+MMB(VK4): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 6 Messpunkten: 
+   nur-Diagnose (8 Bytes mit Wechseln): +0x10(w=2,00>20,last=00) +0x11(w=2,00>57,last=00) +0x12(w=2,00>4F,last=00) +0x13(w=2,00>ED,last=00) +0x14(w=2,00>08,last=00) +0x15(w=2,00>9B,last=00) +0x16(w=2,00>FF,last=00) +0x17(w=2,00>FF,last=00) 
+kein Layout-Match -> Adresse in diesem Modul/Ctx nicht gefunden
+  teste 0xFFFFAE02D2E8C690 (*(gsgs[0][0])+0x3690): 64/64 != 0
+=== BURST auto (kein Mensch) ctx=0x4E4  size=0x100 toggles=3 ===
+idle-stabilität: 256 von 256 stabil (0 instabil)
+LMB(VK1): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 6 Messpunkten: 
+   nur-Diagnose (0 Bytes mit Wechseln): 
+RMB(VK2): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 6 Messpunkten: 
+   nur-Diagnose (0 Bytes mit Wechseln): 
+MMB(VK4): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 6 Messpunkten: 
+   nur-Diagnose (0 Bytes mit Wechseln): 
+kein Layout-Match -> Adresse in diesem Modul/Ctx nicht gefunden
+slots2: kein Treffer in diesen Ketten-Lesarten
+done.

@@ -1,0 +1,8 @@
+keyprobe mode=ktap port=COM3 dll=C:\Users\Admin\Documents\Ickza-DMA\build\dma module=win32kbase.sys
+[ok] loaded C:\Users\Admin\Documents\Ickza-DMA\build\dma\vmm.dll
+[ok] VMM initialized
+[box] reply: km.MAKCU>>> 
+processes: 353
+ktap: gSessionGlobalSlots @ 0xFFFFF807413E7CE0
+ktap: *slot=0x0 unplausibel
+done.

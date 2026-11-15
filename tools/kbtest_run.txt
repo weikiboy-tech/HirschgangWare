@@ -1,0 +1,11 @@
+keyprobe mode=kbtest port=COM3 dll=C:\Users\Admin\Documents\Ickza-DMA\build\dma module=win32kbase.sys
+[ok] loaded C:\Users\Admin\Documents\Ickza-DMA\build\dma\vmm.dll
+[ok] VMM initialized
+[box] reply: km.MAKCU>>> 
+processes: 354
+kbtest: 3 Adresskandidaten, ctx=0x4E4
+--- Adresse *(gsgs)+0x3690 = 0xFFFFAE02CAE88960 (lesbar) ---
+--- Adresse *(*(gsgs))+0x3690 = 0xFFFFAE02D2E8C690 (lesbar) ---
+--- Adresse gsgs+0x3690 = 0xFFFFAE02C7A00640 (lesbar) ---
+kbtest: fertig
+done.

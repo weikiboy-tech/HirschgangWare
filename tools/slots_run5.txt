@@ -1,0 +1,47 @@
+keyprobe mode=slots port=COM3 dll=C:\Users\Admin\Documents\Ickza-DMA\build\dma module=win32kbase.sys
+[ok] loaded C:\Users\Admin\Documents\Ickza-DMA\build\dma\vmm.dll
+[ok] VMM initialized
+[box] reply: km.MAKCU>>> 
+processes: 353
+SIG gSessionGlobalSlots (Win11 24H2+): win32k.sys site-rva=0x16118 disp=0x71BC1 -> global va=0xFFFFF807413E7CE0
+--- session 0 (csrss.exe pid=0x434): slots=0xFFFFAE02C79FCFB0 idx=0 slot=0xFFFFAE02CAE852D0 -> ARRAY=0xFFFFAE02CAE88960
+    Array-Probe: lesbar, 0/64 Bytes != 0
+=== BURST auto (kein Mensch) ctx=0x434  size=0x200 toggles=5 ===
+idle-stabilität: 512 von 512 stabil (0 instabil)
+LMB(VK1): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 10 Messpunkten: 
+   nur-Diagnose (0 Bytes mit Wechseln): 
+RMB(VK2): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 10 Messpunkten: 
+   nur-Diagnose (0 Bytes mit Wechseln): 
+MMB(VK4): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 10 Messpunkten: 
+   nur-Diagnose (0 Bytes mit Wechseln): 
+kein Layout-Match -> Adresse in diesem Modul/Ctx nicht gefunden
+=== BURST auto (kein Mensch) ctx=0x434  size=0x2000 toggles=5 ===
+idle-stabilität: 8192 von 8192 stabil (0 instabil)
+LMB(VK1): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 10 Messpunkten: 
+   nur-Diagnose (0 Bytes mit Wechseln): 
+RMB(VK2): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 10 Messpunkten: 
+   nur-Diagnose (0 Bytes mit Wechseln): 
+MMB(VK4): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 10 Messpunkten: 
+   nur-Diagnose (0 Bytes mit Wechseln): 
+kein Layout-Match -> Adresse in diesem Modul/Ctx nicht gefunden
+--- session 1 (csrss.exe pid=0x4E4): slots=0xFFFFAE02C79FCFB0 idx=0 slot=0xFFFFAE02CAE852D0 -> ARRAY=0xFFFFAE02CAE88960
+    Array-Probe: lesbar, 0/64 Bytes != 0
+=== BURST auto (kein Mensch) ctx=0x4E4  size=0x200 toggles=5 ===
+idle-stabilität: 512 von 512 stabil (0 instabil)
+LMB(VK1): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 10 Messpunkten: 
+   nur-Diagnose (0 Bytes mit Wechseln): 
+RMB(VK2): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 10 Messpunkten: 
+   nur-Diagnose (0 Bytes mit Wechseln): 
+MMB(VK4): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 10 Messpunkten: 
+   nur-Diagnose (0 Bytes mit Wechseln): 
+kein Layout-Match -> Adresse in diesem Modul/Ctx nicht gefunden
+=== BURST auto (kein Mensch) ctx=0x4E4  size=0x2000 toggles=5 ===
+idle-stabilität: 8192 von 8192 stabil (0 instabil)
+LMB(VK1): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 10 Messpunkten: 
+   nur-Diagnose (0 Bytes mit Wechseln): 
+RMB(VK2): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 10 Messpunkten: 
+   nur-Diagnose (0 Bytes mit Wechseln): 
+MMB(VK4): 0 Kandidaten (2 Werte, viele Wechsel, kehrt zurueck) nach 10 Messpunkten: 
+   nur-Diagnose (0 Bytes mit Wechseln): 
+kein Layout-Match -> Adresse in diesem Modul/Ctx nicht gefunden
+done.
