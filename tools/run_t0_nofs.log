@@ -1,0 +1,52 @@
+20:47:08.727 [log] Ickza 2.0 started: --dma (per-monitor dpi on)
+20:47:10.455 [log] start: DMA, draw: skeleton=1 box=0 names=1 info=1 fps=1
+20:47:10.455 [*] waiting for DayZ_x64.exe on the target PC over DMA (offline mode, spawned in)
+20:47:10.541 [*] maps: downloading chernarusplus (satellite, 8192 px)
+20:47:10.549 [radar] raw mouse input registered
+20:47:10.695 [+] radar screen (ImGui) 1920x1080
+20:47:10.718 [trg] COM ports present: COM3
+20:47:10.732 [trg] rx: km.MAKCU
+20:47:10.732 [trg] box ident: km.MAKCU
+20:47:10.734 [trg] status: connected COM3 @ 115200
+20:47:10.734 [trg] baud 115200 works (ident: km.MAKCU)
+20:47:10.738 [trg] binary input streams enabled (mouse+keyboard)
+20:47:10.808 [*] maps: XAM site lists 46 maps
+20:47:11.102 [*] maps: 201 place names for chernarusplus
+20:47:11.102 [*] maps: chernarusplus satellite 8192x8192 px from chernarusplus/26.11.13 (webp)
+20:47:15.250 [*] stopped
+20:47:15.383 [+] maps: C:\Users\Admin\Documents\Ickza-DMA\build\maps\chernarusplus.jpg ready (1024 tiles, 0 empty, 30.8 MB in 5 s)
+20:47:16.461 [radar] raw mouse input registered
+20:47:16.497 [+] radar screen (ImGui) 1920x1080
+20:47:18.667 [+] DayZPlayer: 1 vtable(s)
+20:47:18.716 [!] DayZInfected RTTI unavailable (class 'DayZInfected' has RTTI but no polymorphic instances (no vtable)); using RVA 0x12FBF70 from DayZ 1.30 Main
+20:47:18.755 [log] tel: 0 fps, scan 0/s (avg 0.0 ms), calls/s 1498, call p50 0.01 p95 0.38 max 131.3 ms, link busy 18%, lock p95 0.00 ms, snap age p95 0 ms, fail 56.04%, cpu 125%
+20:47:18.784 [!] DayZAnimal RTTI unavailable (class 'DayZAnimal' has RTTI but no polymorphic instances (no vtable))
+20:47:19.017 [+] Transport: 4 vtable(s)
+20:47:19.141 [+] loot class Weapon: 2 vtable(s)
+20:47:19.268 [+] loot class Magazine: 1 vtable(s)
+20:47:19.384 [+] loot class Clothing_Base: 2 vtable(s)
+20:47:21.007 [trg] binary input streams enabled (mouse+keyboard)
+20:47:28.760 [log] tel: 0 fps, scan 0/s (avg 0.0 ms), calls/s 0, call p50 0.00 p95 0.00 max 0.0 ms, link busy 0%, lock p95 0.00 ms, snap age p95 0 ms, fail 0.00%, cpu 13%
+20:47:31.040 [trg] binary input streams enabled (mouse+keyboard)
+20:47:35.110 [log] start: DMA, draw: skeleton=1 box=0 names=1 info=1 fps=1
+20:47:35.110 [*] waiting for DayZ_x64.exe on the target PC over DMA (offline mode, spawned in)
+20:47:35.922 [*] stopped
+20:47:36.407 [radar] raw mouse input registered
+20:47:36.535 [+] radar screen (ImGui) 1920x1080
+20:47:38.766 [log] tel: 0 fps, scan 0/s (avg 0.0 ms), calls/s 0, call p50 0.00 p95 0.00 max 0.0 ms, link busy 0%, lock p95 0.00 ms, snap age p95 0 ms, fail 0.00%, cpu 30%
+20:47:39.891 [log] start: DMA, draw: skeleton=1 box=0 names=1 info=1 fps=1
+20:47:39.891 [*] waiting for DayZ_x64.exe on the target PC over DMA (offline mode, spawned in)
+20:47:41.091 [trg] binary input streams enabled (mouse+keyboard)
+20:47:41.294 [*] DayZ_x64.exe not running
+20:47:42.069 [*] stopped
+20:47:42.164 [radar] raw mouse input registered
+20:47:42.195 [+] radar screen (ImGui) 1920x1080
+20:47:42.921 [log] start: DMA, draw: skeleton=1 box=0 names=1 info=1 fps=1
+20:47:42.921 [*] waiting for DayZ_x64.exe on the target PC over DMA (offline mode, spawned in)
+20:47:43.045 [*] stopped
+20:47:43.192 [radar] raw mouse input registered
+20:47:43.229 [+] radar screen (ImGui) 1920x1080
+20:47:43.794 [log] start: DMA, draw: skeleton=1 box=0 names=1 info=1 fps=1
+20:47:43.794 [*] waiting for DayZ_x64.exe on the target PC over DMA (offline mode, spawned in)
+20:47:44.372 [-] MemProcFS init failed (fpga)
+20:47:44.394 [*] stopped

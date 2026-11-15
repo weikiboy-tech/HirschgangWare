@@ -1,0 +1,370 @@
+20:49:13.737 [log] Ickza 2.0 started: --dma --fullscreen (per-monitor dpi on)
+20:49:13.805 [log] start: DMA fullscreen, draw: skeleton=1 box=0 names=1 info=1 fps=1
+20:49:13.805 [log] display 1: 1920x1080 at 0,0 @ 59 Hz (primary)  (\\.\DISPLAY1)
+20:49:13.805 [log] display 2: 1024x600 at 1920,0 @ 60 Hz  (\\.\DISPLAY2)
+20:49:13.805 [+] fullscreen on display 1 (1920x1080)
+20:49:13.849 [log] display 1 refresh rates at 1920x1080: 25, 29, 30, 50, 59, 60, 120 Hz (current 59)
+20:49:13.849 [*] waiting for DayZ_x64.exe on the target PC over DMA (offline mode, spawned in)
+20:49:13.920 [radar] raw mouse input registered
+20:49:13.983 [+] radar screen (ImGui) 1024x600
+20:49:14.000 [trg] COM ports present: COM3
+20:49:14.015 [trg] rx: km.MAKCU
+20:49:14.015 [trg] box ident: km.MAKCU
+20:49:14.018 [trg] status: connected COM3 @ 115200
+20:49:14.018 [trg] baud 115200 works (ident: km.MAKCU)
+20:49:14.024 [trg] binary input streams enabled (mouse+keyboard)
+20:49:17.140 [!] DayZPlayer RTTI unavailable (class 'DayZPlayer' has RTTI but no polymorphic instances (no vtable)); using RVA 0x12E2160 from DayZ 1.30 Main
+20:49:17.190 [!] DayZInfected RTTI unavailable (class 'DayZInfected' has RTTI but no polymorphic instances (no vtable)); using RVA 0x12FBF70 from DayZ 1.30 Main
+20:49:17.238 [!] DayZAnimal RTTI unavailable (class 'DayZAnimal' has RTTI but no polymorphic instances (no vtable))
+20:49:17.304 [+] Transport: 1 vtable(s)
+20:49:17.472 [!] Weapon RTTI unavailable (no RTTI for class 'Weapon' in module)
+20:49:17.644 [!] Magazine RTTI unavailable (no RTTI for class 'Magazine' in module)
+20:49:17.706 [!] Clothing_Base RTTI unavailable (class 'Clothing_Base' has RTTI but no polymorphic instances (no vtable))
+20:49:17.718 [*] dayz_rare.txt: 15 rare item pattern(s)
+20:49:17.729 [*] dayz_loot_cats.txt: 0 category override(s)
+20:49:17.729 [+] attached: pid 3788, base 0x7FF6AA1A0000. END quits.
+20:49:17.734 [log] window created: 0,0 1920x1080 on \\.\DISPLAY1, visible=1 topmost=1 dpi=96 foreground=1
+20:49:17.747 [+] renderer: D3D11 flip + Direct2D on Intel(R) HD Graphics 530 (1920x1080, tearing ok)
+20:49:17.748 [trg] keyresolve pidFromName -> pids=2 (1352,1076)
+20:49:17.748 [trg] keyresolve pids=247 eatapi=1 modapi=1
+20:49:17.825 [log] DMA speed test: 112.6 MB/s
+20:49:17.826 [+] radar: game world 'chernarusplus' -> map chernarusplus
+20:49:17.830 [log] roster names (113, 0 "Survivor"): Kyraaa, maxi.628, Rainer Winkler, Bob Tschigerillo, Reggie, Stour, KUDI, Frodio, zsyrix, MeisterProper, hoot hoot, SiiKoo, BigWigga, Sidewayz_, ASTRA, Tigriuke, JessyGunner, William S Troker, Lack of aim, Veltrix, Skyline, Rigby, Goat Fucker, -N O C T I S-, blue_beast203, Abysmol, SADDAM HUSSEIN, WHY ME?, ShalomDestroyer3000, Jakobi, KAW KA SII, Aslan , Kyo...., Kiiwey, Osama Bin Stashin, ItsFenix420, Pantoffel Petrus, ...LatvietiS..., Foz, Justin Biebler, Morphine, anyy, papadhm, Harry Pottraucher, pm31, Soho, Yuta, heinken, Dicky, MC Genno D , Streamer Killer, AYAYAY, TimboSlice, Vagino, W0R3L, .22 LR Demon, Finger Blaster, JimFromTheCrown, LingLing give u Ding Ding, bolx, Yakuza_Canario, DJANGO, Tiago14, ShadowStorm, cssmokey, milescs, Atson, SjMX, sammyy, Pia Olsen Dyhr, Tun Tun Tun Sahur, UNLUCKY, Mette Frederiksen, PDF File, Nicke, Polle.^^, Wheelieboy, Michael Scofield, HarDREseT, sunt roman, Boy, KAIIZ_BE, PXVYI, Somat10, mrbee, Nazgul, user1, Hunter45, Captain
+20:49:17.830 [log] roster: 113 players on the server; 0 of 0 survivors named: 
+20:49:17.831 [log] held: you ""; 0 of 0 holding something (0 unnamed): 
+20:49:17.833 [!] own name chain stops at hop 4 (World+0x30=198CB02FFD0 ->+0x8=1984CB32920 ->+0x3E8=1984CB23000 ->+0xC0=1981EBF7270)
+20:49:17.834 [log] scan: ok
+20:49:17.834 [log] DayZ: 0 slots, 0 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:49:17.836 [log] DayZ camera: basis +0x8, pos 0.0 0.0 0.0, tan(fov/2) 0.989 x 0.556
+20:49:18.456 [trg] keyresolve baseKernel=0xFFFFF8073E9D0000 rva=0x2AE7CD (sdk ctx ok)
+20:49:18.861 [trg] keyresolve base(ctx 0x80000548)=0xFFFFF8073E9D0000
+20:49:18.861 [trg] keyresolve blind scan skipped (baseK=0xFFFFF8073E9D0000 outside 0xFFFFF80000000000-0xFFFFF80100000000)
+20:49:18.861 [trg] keyresolve base(ctx 0x4)=0xFFFFF8073E9D0000
+20:49:18.868 [trg] keyresolve base(ctx 0x548)=0x0
+20:49:18.868 [trg] keyresolve base(ctx 0x80000ECC)=0x0
+20:49:18.868 [trg] keyresolve base(ctx 0xECC)=0x0
+20:49:19.434 [trg] modlist ctx=0x434 n=256 sgd=0x0: ntoskrnl.exe|csrss.exe|ServicingCommon.dll|sxs.dll|sxssrv.DLL|winsrvext.dll|winsrv.DLL|basesrv.DLL|CSRSRV.dll|msvcp_win.dll|ucrtbase.dll|bcryptPrimitives.dll|gdi32full.dll|win32u.dll|kernelbase.dll|RPCRT4.dll|kernel32.dll|msvcrt.dll|ADVAPI32.dll|sechost.dll|GDI32.dll|USER32.dll|ntdll.dll|RTKVHD64.sys|usbccgp.sys|RtkBtfilter.sys|BTHport.sys|BTHUSB.sys|hidusb.sys|HIDCLASS.SYS|HIDPARSE.SYS|kbdhid.sys|kbdclass.sys|usbaudio.sys|mouhid.sys|mouclass.sys|rfcomm.sys|BthEnum.sys|bthpan.sys|CTEXFIFX.SYS|AtihdWT6.sys|Microsoft.Bluetooth.Legacy.LEEnumerator.sys|mrxsmb.sys|mrxsmb20.sys|srvnet.sys|mmcss.sys|Ndu.sys|peauth.sys|tcpipreg.sys|wtd.sys|condrv.sys|vhf.sys|srv2.sys|HTTP.sys|bowser.sys|mpsdrv.sys|mcupdate.dll|win32kfull.sys|win32kbase_rs.sys|dxgmms2.sys|monitor.sys|cdd.dll|bfs.sys|luafv.sys|wcifs.sys|cldflt.sys|bindflt.sys|win32kbase.sys|UnionFS.sys|
+20:49:19.434 [trg] modlist ctx=0x80000434 n=256 sgd=0x0: ntoskrnl.exe|csrss.exe|ServicingCommon.dll|sxs.dll|sxssrv.DLL|winsrvext.dll|winsrv.DLL|basesrv.DLL|CSRSRV.dll|msvcp_win.dll|ucrtbase.dll|bcryptPrimitives.dll|gdi32full.dll|win32u.dll|kernelbase.dll|RPCRT4.dll|kernel32.dll|msvcrt.dll|ADVAPI32.dll|sechost.dll|GDI32.dll|USER32.dll|ntdll.dll|RTKVHD64.sys|usbccgp.sys|RtkBtfilter.sys|BTHport.sys|BTHUSB.sys|hidusb.sys|HIDCLASS.SYS|HIDPARSE.SYS|kbdhid.sys|kbdclass.sys|usbaudio.sys|mouhid.sys|mouclass.sys|rfcomm.sys|BthEnum.sys|bthpan.sys|CTEXFIFX.SYS|AtihdWT6.sys|Microsoft.Bluetooth.Legacy.LEEnumerator.sys|mrxsmb.sys|mrxsmb20.sys|srvnet.sys|mmcss.sys|Ndu.sys|peauth.sys|tcpipreg.sys|wtd.sys|condrv.sys|vhf.sys|srv2.sys|HTTP.sys|bowser.sys|mpsdrv.sys|mcupdate.dll|win32kfull.sys|win32kbase_rs.sys|dxgmms2.sys|monitor.sys|cdd.dll|bfs.sys|luafv.sys|wcifs.sys|cldflt.sys|bindflt.sys|win32kbase.sys|UnionFS.sys|
+20:49:19.824 [log] DayZ: 0 slots, 0 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:49:20.018 [trg] modlist ctx=0x4E4 n=256 sgd=0x0: ntoskrnl.exe|csrss.exe|ServicingCommon.dll|sxs.dll|sxssrv.DLL|winsrvext.dll|winsrv.DLL|basesrv.DLL|CSRSRV.dll|msvcp_win.dll|ucrtbase.dll|bcryptPrimitives.dll|gdi32full.dll|win32u.dll|kernelbase.dll|RPCRT4.dll|kernel32.dll|msvcrt.dll|ADVAPI32.dll|sechost.dll|GDI32.dll|USER32.dll|ntdll.dll|RTKVHD64.sys|usbccgp.sys|RtkBtfilter.sys|BTHport.sys|BTHUSB.sys|hidusb.sys|HIDCLASS.SYS|HIDPARSE.SYS|kbdhid.sys|kbdclass.sys|usbaudio.sys|mouhid.sys|mouclass.sys|rfcomm.sys|BthEnum.sys|bthpan.sys|CTEXFIFX.SYS|AtihdWT6.sys|Microsoft.Bluetooth.Legacy.LEEnumerator.sys|mrxsmb.sys|mrxsmb20.sys|srvnet.sys|mmcss.sys|Ndu.sys|peauth.sys|tcpipreg.sys|wtd.sys|condrv.sys|vhf.sys|srv2.sys|HTTP.sys|bowser.sys|mpsdrv.sys|mcupdate.dll|win32kfull.sys|win32kbase_rs.sys|dxgmms2.sys|monitor.sys|cdd.dll|bfs.sys|luafv.sys|wcifs.sys|cldflt.sys|bindflt.sys|win32kbase.sys|UnionFS.sys|
+20:49:20.019 [trg] modlist ctx=0x800004E4 n=256 sgd=0x0: ntoskrnl.exe|csrss.exe|ServicingCommon.dll|sxs.dll|sxssrv.DLL|winsrvext.dll|winsrv.DLL|basesrv.DLL|CSRSRV.dll|msvcp_win.dll|ucrtbase.dll|bcryptPrimitives.dll|gdi32full.dll|win32u.dll|kernelbase.dll|RPCRT4.dll|kernel32.dll|msvcrt.dll|ADVAPI32.dll|sechost.dll|GDI32.dll|USER32.dll|ntdll.dll|RTKVHD64.sys|usbccgp.sys|RtkBtfilter.sys|BTHport.sys|BTHUSB.sys|hidusb.sys|HIDCLASS.SYS|HIDPARSE.SYS|kbdhid.sys|kbdclass.sys|usbaudio.sys|mouhid.sys|mouclass.sys|rfcomm.sys|BthEnum.sys|bthpan.sys|CTEXFIFX.SYS|AtihdWT6.sys|Microsoft.Bluetooth.Legacy.LEEnumerator.sys|mrxsmb.sys|mrxsmb20.sys|srvnet.sys|mmcss.sys|Ndu.sys|peauth.sys|tcpipreg.sys|wtd.sys|condrv.sys|vhf.sys|srv2.sys|HTTP.sys|bowser.sys|mpsdrv.sys|mcupdate.dll|win32kfull.sys|win32kbase_rs.sys|dxgmms2.sys|monitor.sys|cdd.dll|bfs.sys|luafv.sys|wcifs.sys|cldflt.sys|bindflt.sys|win32kbase.sys|UnionFS.sys|
+20:49:21.827 [log] DayZ: 0 slots, 0 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:49:22.767 [cam] 1s: 1 changes, 1 jumps (max 0.0 deg, 11159.64 m), fov tan 0.989..0.989, Camera* swaps 0 (now 198CB719330)
+20:49:22.848 [log] held: you ""; 0 of 0 holding something (0 unnamed): 
+20:49:23.749 [log] tel: 0 fps, scan 175/s (avg 1.7 ms), calls/s 2560, call p50 0.00 p95 0.77 max 230.7 ms, link busy 48%, lock p95 0.38 ms, snap age p95 0 ms, fail 45.18%, cpu 93%
+20:49:23.843 [log] DayZ: 0 slots, 0 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:49:24.870 [trg] eatctl ntoskrnl dwVersion=3 names=3360 funcs=3397 cMap=3397 vaBase=0xFFFFF807AF200000
+20:49:24.930 [trg] keycand pdb/win32kbase pid=0x80000548 va=0xFFFFF8073EC7E7CD
+20:49:24.930 [trg] keycand pdb/win32kbase pid=0x4 va=0xFFFFF8073EC7E7CD
+20:49:24.930 [trg] keycand mod/win32kbase pid=0x434 va=0xFFFFF8073EC7E7CD
+20:49:24.930 [trg] keycand mod/win32kbase pid=0x80000434 va=0xFFFFF8073EC7E7CD
+20:49:24.930 [trg] keycand mod/win32kbase pid=0x4 va=0xFFFFF8073EC7E7CD
+20:49:24.930 [trg] keycand mod/win32kbase pid=0x80000004 va=0xFFFFF8073EC7E7CD
+20:49:24.930 [trg] keycand mod/win32kbase pid=0xE0 va=0xFFFFF8073EC7E7CD
+20:49:24.930 [trg] keycand mod/win32kbase pid=0x800000E0 va=0xFFFFF8073EC7E7CD
+20:49:24.930 [trg] keycand mod/win32kbase pid=0x4E4 va=0xFFFFF8073EC7E7CD
+20:49:24.930 [trg] keycand mod/win32kbase pid=0x800004E4 va=0xFFFFF8073EC7E7CD
+20:49:24.930 [trg] keycand mod/win32kbase pid=0x588 va=0xFFFFF8073EC7E7CD
+20:49:24.930 [trg] keycand mod/win32kbase pid=0x80000588 va=0xFFFFF8073EC7E7CD
+20:49:24.930 [trg] keyresolve modCands=10 eatCands=0
+20:49:24.930 [trg] keyresolve cands=12
+20:49:24.937 [trg] keydiag ctxpid=2147485000 how=pdb/win32kbase va=0xFFFFF8073EC7E7CD rawnz=7 raw=00000000000000000000000000000000000000000000000000000000000000000000000000000000000000809698000000000080F0FA02000000000000000000
+20:49:24.937 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:49:24.937 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:49:24.997 [trg] binary input streams enabled (mouse+keyboard)
+20:49:24.997 [trg] dma key state: ready (ready via pdb/win32kbase (ctxpid 2147485000, cands 12, va 0xFFFFF8073EC7E7CD))
+20:49:25.020 [*] radar: 201 place names for chernarusplus
+20:49:25.837 [log] DayZ: 0 slots, 0 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:49:26.451 [*] radar: map image 8192x8192
+20:49:26.452 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:49:26.452 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:49:26.942 [log] render: 465 fps, cam 0.75 ms, paint 1.27 ms, 0 boxes
+20:49:27.825 [log] roster: 112 players on the server; 0 of 0 survivors named: 
+20:49:27.834 [log] DayZ: 0 slots, 0 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:49:27.849 [log] held: you ""; 0 of 0 holding something (0 unnamed): 
+20:49:27.940 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:49:27.940 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:49:28.942 [log] render: 561 fps, cam 0.64 ms, paint 1.19 ms, 0 boxes
+20:49:29.438 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:49:29.438 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:49:29.831 [log] DayZ: 1 slots, 0 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:49:29.926 [trg] keyscan pdb/win32kbase pid=0x80000548 va=0xFFFFF8073EC7E7CD down=0 new=0 layout2
+20:49:29.927 [trg] keyscan pdb/win32kbase pid=0x4 va=0xFFFFF8073EC7E7CD down=0 new=0 layout2
+20:49:29.928 [trg] keyscan mod/win32kbase pid=0x434 va=0xFFFFF8073EC7E7CD down=0 new=0 layout2
+20:49:29.929 [trg] keyscan mod/win32kbase pid=0x80000434 va=0xFFFFF8073EC7E7CD down=0 new=0 layout2
+20:49:29.929 [trg] keyscan mod/win32kbase pid=0x4 va=0xFFFFF8073EC7E7CD down=0 new=0 layout2
+20:49:29.930 [trg] keyscan mod/win32kbase pid=0x80000004 va=0xFFFFF8073EC7E7CD down=0 new=0 layout2
+20:49:29.931 [trg] keyscan mod/win32kbase pid=0xE0 va=0xFFFFF8073EC7E7CD down=0 new=0 layout2
+20:49:29.931 [trg] keyscan mod/win32kbase pid=0x800000E0 va=0xFFFFF8073EC7E7CD down=0 new=0 layout2
+20:49:29.932 [trg] keyscan mod/win32kbase pid=0x4E4 va=0xFFFFF8073EC7E7CD down=0 new=0 layout2
+20:49:29.932 [trg] keyscan mod/win32kbase pid=0x800004E4 va=0xFFFFF8073EC7E7CD down=0 new=0 layout2
+20:49:29.933 [trg] keyscan mod/win32kbase pid=0x588 va=0xFFFFF8073EC7E7CD down=0 new=0 layout2
+20:49:29.933 [trg] keyscan mod/win32kbase pid=0x80000588 va=0xFFFFF8073EC7E7CD down=0 new=0 layout2
+20:49:29.933 [trg] keyscan no hit (new=0 down=0) - re-arm, keep pressing
+20:49:29.933 [trg] refine armed 0 images (of 0 scan cands) in 0 ms - HOLD the keys
+20:49:30.939 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:49:30.939 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:49:30.942 [log] render: 558 fps, cam 0.87 ms, paint 1.30 ms, 0 boxes
+20:49:31.836 [log] DayZ: 8 slots, 0 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:49:32.438 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:49:32.438 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:49:32.848 [log] held: you ""; 0 of 0 holding something (0 unnamed): 
+20:49:32.943 [log] render: 549 fps, cam 0.73 ms, paint 0.86 ms, 0 boxes
+20:49:33.755 [log] tel: 474 fps, scan 275/s (avg 1.9 ms), calls/s 1096, call p50 0.51 p95 2.05 max 24.6 ms, link busy 60%, lock p95 0.77 ms, snap age p95 6 ms, fail 5.05%, cpu 111%
+20:49:33.780 [cam] 1s: 14 changes, 2 jumps (max 113.2 deg, 1.65 m), fov tan 0.989..1.333, Camera* swaps 0 (now 198CB719330)
+20:49:33.825 [*] own name: "BLACK BOY WITH LAG"
+20:49:33.825 [log] DayZ: 10 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:49:33.938 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:49:33.938 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:49:34.780 [cam] 1s: 25 changes, 0 jumps (max 0.0 deg, 0.00 m), fov tan 0.989..1.280, Camera* swaps 0 (now 198CB719330)
+20:49:34.924 [trg] refine BEST rise=0 heldB=0 layout2 ctx=0x0 va=0x0 off=0x0
+20:49:34.924 [trg] refine armed 0 images (of 0 scan cands) in 0 ms - HOLD the keys
+20:49:34.946 [log] render: 560 fps, cam 0.62 ms, paint 1.38 ms, 0 boxes
+20:49:35.011 [trg] binary input streams enabled (mouse+keyboard)
+20:49:35.438 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:49:35.438 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:49:35.834 [log] DayZ: 11 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:49:36.941 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:49:36.941 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:49:36.944 [log] render: 565 fps, cam 0.71 ms, paint 1.53 ms, 0 boxes
+20:49:37.830 [log] roster: 113 players on the server; 0 of 0 survivors named: 
+20:49:37.841 [log] DayZ: 11 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:49:37.848 [log] held: you ""; 0 of 1 holding something (0 unnamed): 
+20:49:38.439 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:49:38.439 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:49:38.943 [log] render: 555 fps, cam 0.69 ms, paint 1.40 ms, 0 boxes
+20:49:39.834 [log] DayZ: 13 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:49:39.923 [trg] refine BEST rise=0 heldB=0 layout2 ctx=0x0 va=0x0 off=0x0
+20:49:39.923 [trg] refine armed 0 images (of 0 scan cands) in 0 ms - HOLD the keys
+20:49:39.940 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:49:39.940 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:49:40.943 [log] render: 557 fps, cam 0.75 ms, paint 1.55 ms, 0 boxes
+20:49:41.438 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:49:41.438 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:49:41.831 [log] DayZ: 14 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:49:42.849 [log] held: you ""; 0 of 1 holding something (0 unnamed): 
+20:49:42.939 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:49:42.939 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:49:42.941 [log] render: 555 fps, cam 0.92 ms, paint 1.08 ms, 0 boxes
+20:49:43.764 [log] tel: 557 fps, scan 265/s (avg 2.0 ms), calls/s 1004, call p50 0.51 p95 2.05 max 6.6 ms, link busy 54%, lock p95 0.51 ms, snap age p95 6 ms, fail 1.75%, cpu 97%
+20:49:43.835 [log] DayZ: 14 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:49:44.439 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:49:44.439 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:49:44.922 [trg] refine BEST rise=0 heldB=0 layout2 ctx=0x0 va=0x0 off=0x0
+20:49:44.922 [trg] refine armed 0 images (of 0 scan cands) in 0 ms - HOLD the keys
+20:49:44.943 [log] render: 549 fps, cam 0.67 ms, paint 1.21 ms, 0 boxes
+20:49:45.027 [trg] binary input streams enabled (mouse+keyboard)
+20:49:45.824 [log] DayZ: 14 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:49:45.939 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:49:45.940 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:49:46.940 [log] render: 559 fps, cam 0.73 ms, paint 1.25 ms, 0 boxes
+20:49:47.438 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:49:47.438 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:49:47.836 [log] roster: 112 players on the server; 0 of 0 survivors named: 
+20:49:47.843 [log] DayZ: 14 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:49:47.854 [log] held: you ""; 0 of 1 holding something (0 unnamed): 
+20:49:48.941 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:49:48.941 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:49:48.945 [log] render: 542 fps, cam 0.70 ms, paint 1.30 ms, 0 boxes
+20:49:49.836 [log] DayZ: 13 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:49:49.922 [trg] refine BEST rise=0 heldB=0 layout2 ctx=0x0 va=0x0 off=0x0
+20:49:49.922 [trg] refine armed 0 images (of 0 scan cands) in 0 ms - HOLD the keys
+20:49:50.440 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:49:50.440 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:49:50.942 [log] render: 546 fps, cam 0.77 ms, paint 0.98 ms, 0 boxes
+20:49:51.834 [log] DayZ: 13 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:49:51.938 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:49:51.938 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:49:52.848 [log] held: you ""; 0 of 1 holding something (0 unnamed): 
+20:49:52.944 [log] render: 553 fps, cam 0.69 ms, paint 1.34 ms, 0 boxes
+20:49:53.440 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:49:53.440 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:49:53.774 [log] tel: 547 fps, scan 256/s (avg 2.0 ms), calls/s 946, call p50 0.51 p95 2.05 max 6.8 ms, link busy 52%, lock p95 0.51 ms, snap age p95 6 ms, fail 0.00%, cpu 102%
+20:49:53.831 [log] DayZ: 13 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:49:54.926 [trg] refine BEST rise=0 heldB=0 layout2 ctx=0x0 va=0x0 off=0x0
+20:49:54.926 [trg] refine armed 0 images (of 0 scan cands) in 0 ms - HOLD the keys
+20:49:54.940 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:49:54.940 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:49:54.942 [log] render: 555 fps, cam 0.79 ms, paint 0.98 ms, 0 boxes
+20:49:55.040 [trg] binary input streams enabled (mouse+keyboard)
+20:49:55.851 [log] DayZ: 13 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:49:56.440 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:49:56.440 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:49:56.943 [log] render: 558 fps, cam 0.77 ms, paint 1.37 ms, 0 boxes
+20:49:57.823 [log] roster: 114 players on the server; 0 of 0 survivors named: 
+20:49:57.827 [log] DayZ: 13 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:49:57.849 [log] held: you ""; 0 of 1 holding something (0 unnamed): 
+20:49:57.940 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:49:57.941 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:49:58.945 [log] render: 550 fps, cam 0.73 ms, paint 1.16 ms, 0 boxes
+20:49:59.438 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:49:59.438 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:49:59.837 [log] DayZ: 13 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:49:59.922 [trg] refine BEST rise=0 heldB=0 layout2 ctx=0x0 va=0x0 off=0x0
+20:49:59.922 [trg] refine gave up after 6 tries (0 ms) - tentative candidate kept
+20:50:00.938 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:00.938 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:00.943 [log] render: 554 fps, cam 0.73 ms, paint 1.29 ms, 0 boxes
+20:50:01.831 [log] DayZ: 13 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:50:02.440 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:02.440 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:02.855 [log] held: you ""; 0 of 1 holding something (0 unnamed): 
+20:50:02.942 [log] render: 552 fps, cam 0.69 ms, paint 1.13 ms, 0 boxes
+20:50:03.783 [log] tel: 548 fps, scan 258/s (avg 2.0 ms), calls/s 949, call p50 0.51 p95 2.05 max 6.3 ms, link busy 52%, lock p95 0.51 ms, snap age p95 6 ms, fail 0.00%, cpu 96%
+20:50:03.828 [log] DayZ: 13 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:50:03.939 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:03.939 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:04.942 [log] render: 449 fps, cam 0.56 ms, paint 0.91 ms, 0 boxes
+20:50:05.058 [trg] binary input streams enabled (mouse+keyboard)
+20:50:05.439 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:05.439 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:05.828 [log] DayZ: 13 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:50:06.938 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:06.938 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:06.941 [log] render: 520 fps, cam 0.60 ms, paint 0.92 ms, 0 boxes
+20:50:07.837 [log] roster: 114 players on the server; 0 of 0 survivors named: 
+20:50:07.844 [log] DayZ: 13 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:50:07.847 [log] held: you ""; 0 of 1 holding something (0 unnamed): 
+20:50:08.439 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:08.439 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:08.943 [log] render: 556 fps, cam 0.60 ms, paint 1.14 ms, 0 boxes
+20:50:09.830 [log] DayZ: 13 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:50:09.940 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:09.940 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:10.940 [log] render: 550 fps, cam 0.68 ms, paint 1.25 ms, 0 boxes
+20:50:11.439 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:11.439 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:11.835 [log] DayZ: 13 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:50:12.854 [log] held: you ""; 0 of 1 holding something (0 unnamed): 
+20:50:12.939 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:12.939 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:12.941 [log] render: 554 fps, cam 0.72 ms, paint 0.98 ms, 0 boxes
+20:50:13.791 [log] tel: 528 fps, scan 268/s (avg 1.9 ms), calls/s 990, call p50 0.51 p95 2.05 max 5.0 ms, link busy 51%, lock p95 0.51 ms, snap age p95 6 ms, fail 0.00%, cpu 101%
+20:50:13.826 [log] DayZ: 13 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:50:14.439 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:14.439 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:14.943 [log] render: 556 fps, cam 0.76 ms, paint 1.41 ms, 0 boxes
+20:50:15.073 [trg] binary input streams enabled (mouse+keyboard)
+20:50:15.843 [log] DayZ: 13 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:50:15.938 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:15.938 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:16.942 [log] render: 551 fps, cam 0.72 ms, paint 1.31 ms, 0 boxes
+20:50:17.438 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:17.438 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:17.824 [log] roster: 114 players on the server; 0 of 0 survivors named: 
+20:50:17.830 [log] DayZ: 13 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:50:17.847 [log] held: you ""; 0 of 1 holding something (0 unnamed): 
+20:50:18.939 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:18.939 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:18.942 [log] render: 545 fps, cam 0.70 ms, paint 1.20 ms, 0 boxes
+20:50:19.842 [log] DayZ: 13 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:50:20.439 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:20.440 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:20.942 [log] render: 549 fps, cam 0.72 ms, paint 1.13 ms, 0 boxes
+20:50:21.832 [log] DayZ: 13 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:50:21.939 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:21.939 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:22.850 [log] held: you ""; 0 of 1 holding something (0 unnamed): 
+20:50:22.947 [log] render: 551 fps, cam 0.71 ms, paint 1.29 ms, 0 boxes
+20:50:23.439 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:23.439 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:23.800 [log] tel: 548 fps, scan 262/s (avg 2.0 ms), calls/s 967, call p50 0.51 p95 2.05 max 7.3 ms, link busy 52%, lock p95 0.51 ms, snap age p95 6 ms, fail 0.00%, cpu 96%
+20:50:23.829 [log] DayZ: 13 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:50:24.939 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:24.939 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:24.942 [log] render: 550 fps, cam 0.72 ms, paint 1.39 ms, 0 boxes
+20:50:25.088 [trg] binary input streams enabled (mouse+keyboard)
+20:50:25.831 [log] DayZ: 13 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:50:26.439 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:26.439 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:26.942 [log] render: 550 fps, cam 0.76 ms, paint 1.27 ms, 0 boxes
+20:50:27.832 [log] roster: 115 players on the server; 0 of 0 survivors named: 
+20:50:27.837 [log] DayZ: 13 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:50:27.845 [log] held: you ""; 0 of 1 holding something (0 unnamed): 
+20:50:27.942 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:27.942 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:28.943 [log] render: 538 fps, cam 0.74 ms, paint 1.30 ms, 0 boxes
+20:50:29.438 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:29.439 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:29.831 [log] DayZ: 13 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:50:30.943 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:30.943 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:30.946 [log] render: 526 fps, cam 0.96 ms, paint 1.46 ms, 0 boxes
+20:50:31.836 [log] DayZ: 13 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:50:32.439 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:32.439 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:32.853 [log] held: you ""; 0 of 1 holding something (0 unnamed): 
+20:50:32.942 [log] render: 511 fps, cam 0.92 ms, paint 0.99 ms, 0 boxes
+20:50:33.831 [log] DayZ: 15 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:50:33.862 [log] tel: 541 fps, scan 242/s (avg 2.3 ms), calls/s 894, call p50 0.51 p95 2.05 max 10.2 ms, link busy 55%, lock p95 0.51 ms, snap age p95 6 ms, fail 0.00%, cpu 97%
+20:50:33.939 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:33.939 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:34.943 [log] render: 586 fps, cam 0.66 ms, paint 0.97 ms, 0 boxes
+20:50:35.107 [trg] binary input streams enabled (mouse+keyboard)
+20:50:35.439 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:35.439 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:35.837 [log] DayZ: 15 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:50:36.939 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:36.939 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:36.943 [log] render: 512 fps, cam 0.99 ms, paint 1.00 ms, 0 boxes
+20:50:37.837 [log] roster: 114 players on the server; 0 of 0 survivors named: 
+20:50:37.852 [log] DayZ: 15 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:50:37.857 [log] held: you ""; 0 of 1 holding something (0 unnamed): 
+20:50:38.438 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:38.439 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:38.941 [log] render: 535 fps, cam 1.07 ms, paint 1.26 ms, 0 boxes
+20:50:39.846 [log] DayZ: 15 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:50:39.939 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:39.939 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:40.943 [log] render: 585 fps, cam 0.69 ms, paint 1.30 ms, 0 boxes
+20:50:41.440 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:41.440 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:41.833 [log] DayZ: 15 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:50:42.846 [log] held: you ""; 0 of 1 holding something (0 unnamed): 
+20:50:42.938 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:42.938 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:42.941 [log] render: 581 fps, cam 0.71 ms, paint 1.20 ms, 0 boxes
+20:50:43.838 [log] DayZ: 15 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:50:43.945 [log] tel: 561 fps, scan 236/s (avg 2.4 ms), calls/s 876, call p50 0.51 p95 2.05 max 17.1 ms, link busy 57%, lock p95 0.51 ms, snap age p95 6 ms, fail 0.00%, cpu 92%
+20:50:44.438 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:44.438 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:44.942 [log] render: 565 fps, cam 1.11 ms, paint 0.54 ms, 0 boxes
+20:50:45.120 [trg] binary input streams enabled (mouse+keyboard)
+20:50:45.830 [log] DayZ: 15 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:50:45.939 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:45.939 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:46.944 [log] render: 569 fps, cam 0.67 ms, paint 1.35 ms, 0 boxes
+20:50:47.440 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:47.440 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:47.827 [log] roster: 114 players on the server; 0 of 0 survivors named: 
+20:50:47.828 [log] DayZ: 15 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:50:47.850 [log] held: you ""; 0 of 1 holding something (0 unnamed): 
+20:50:48.939 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:48.939 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:48.941 [log] render: 577 fps, cam 0.64 ms, paint 1.11 ms, 0 boxes
+20:50:49.830 [log] DayZ: 15 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:50:50.438 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:50.438 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:50.941 [log] render: 568 fps, cam 0.68 ms, paint 0.92 ms, 0 boxes
+20:50:51.830 [log] DayZ: 13 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:50:51.938 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:51.938 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:52.847 [log] held: you ""; 0 of 1 holding something (0 unnamed): 
+20:50:52.943 [log] render: 580 fps, cam 0.68 ms, paint 1.25 ms, 0 boxes
+20:50:53.438 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:53.438 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:53.824 [log] DayZ: 13 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:50:53.954 [log] tel: 573 fps, scan 267/s (avg 2.0 ms), calls/s 967, call p50 0.51 p95 2.05 max 41.7 ms, link busy 53%, lock p95 0.51 ms, snap age p95 6 ms, fail 0.00%, cpu 96%
+20:50:54.941 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:54.941 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:54.943 [log] render: 579 fps, cam 0.81 ms, paint 1.21 ms, 0 boxes
+20:50:55.135 [trg] binary input streams enabled (mouse+keyboard)
+20:50:55.834 [log] DayZ: 12 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:50:56.438 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:56.438 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
+20:50:56.941 [log] render: 576 fps, cam 0.64 ms, paint 1.08 ms, 0 boxes
+20:50:57.827 [log] roster: 114 players on the server; 0 of 0 survivors named: 
+20:50:57.829 [log] DayZ: 12 slots, 1 targets, 0 drawable, 0 dead, loot 0/0, bones 0 real / 0 fallback
+20:50:57.847 [log] held: you ""; 0 of 1 holding something (0 unnamed): 
+20:50:57.940 [trg] keydiag down=7 B1 B2 B6 D2 D3 D6 D7
+20:50:57.940 [trg] keycheck keys: 10=0 20=0 41=0 44=0 45=0 53=0 57=0 | layout=2 ctx=0x80000548 va=0xFFFFF8073EC7E7CD
