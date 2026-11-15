@@ -121,6 +121,105 @@ Vorbedingung: nur **ein** DMA-Besitzer (`Ickza.exe` / MemProcFS / PureDMA / `key
 
 Zusätzlich (Anforderung 6/7): bei fehlgeschlagenem Read gezielt Box/Kabel trennen und prüfen, dass **kein** alter Zustand weiterverwendet wird (kein Dauerfeuer, keine „klebende" Taste).
 
+## 5. URSACHENBERICHT (15.11., nach Nutzer-Abnahme: „funktional FEHLGESCHLAGEN")
+
+**Status ehrlich:** „DMA-Speicherzugriff bestätigt — Tastaturdekodierung **nicht** verifiziert".
+
+| Stufe | Status | Beleg |
+|---|---|---|
+| 1 DMA-Read funktioniert | **ok** | `keydiag ctxpid=… rawnz=… raw=…` kommt an |
+| 2 plausibler Bereich gefunden | **ok** | `refine BEST … off=0x2AEAD7` |
+| 3 Änderung im Bereich erkannt | **ok** | `keydiag change …` |
+| 4 Individualzustand korrekt dekodiert | **FEHLER** | Phantom-VKs dauerhaft „down" (0x0B 0x34 0x4A 0x4B 0x4D 0x74); E-Druck ändert *kein* Byte außer einem ms-Zähler |
+| 5 korrekter VK | **FEHLER** | VKs 0x44…0x49 „flappen" im 250-ms-Takt = Zählerbits |
+| 6 Bind-System korrekt | **FEHLER** | Anzeige `PAUSE (0x45)`, Zufalls-Binds |
+
+### 5.1 Beweis A — am „verifizierten" VA ändert ein E-Druck **nicht** das Bitmap
+Aus `build\Ickza.log` (21:04:23.110 / .127 / .143 / .157):
+```
+[trg] keydiag change 44:00>80 46:80>00 raw=0000400000000000000200000001000000 ADDC0600 0000000002000000 01000000 …
+[trg] keydiag change 46:00>80        raw=0000400000000000000200000001000000 BFDC0600 0000000002000000 01000000 …
+[trg] keydiag change 45:80>00 46:80>00 47:00>80 raw=… CBDC0600 …
+```
+* Die Raw-Zeilen unterscheiden sich **ausschließlich in Byte 0x10-0x13** — ein LE32-Zähler: `0x0006DCAD`, `0x0006DCBF`, `0x0006DCCB` → +1 pro Millisekunde (`0x6DCAD` = 449 709 ms ≈ App-Laufzeit ✔).
+* Die „erkannten Tasten" sind **genau die Zählerbits**: bei `layout2` (byte=(vk*2)/8, bit=(vk%4)*2) gilt VK 0x44→Byte 0x11 Bit0 = **Zählerbit 8**, 0x45→Bit10, 0x46→Bit12, 0x47→Bit14, 0x48→Byte 0x12 Bit0 = Bit16 …; `0x0006DCAD` erklärt `44=0/45=1` (21:04:18) und `44=1/45=1` (21:04:23) exakt.
+* Das Fenster hat `rawnz=8` mit **festen** Offsets (2, 9, 13, 16-19, 25, 29) → keine 64-Byte-Bitmap-Struktur.
+
+### 5.2 Beweis B — warum das Modell das „bestätigt" hat (Code)
+* `refineCompare()` akzeptiert, sobald `rise >= 1 && heldB == rise` und (`bestDiff >= 2` **oder** dieselbe Adresse zweimal) — `dma.cpp:521-534`. **Ein laufender ms-Zähler erfüllt „2 Bits steigen zwischen zwei Samples" fast immer** → sofort „confirmed" (Log: `rise=2 heldB=2 … refine confirmed`).
+* Das Scoring ist ein strikter Aufwärtsvergleich über **alle Offsets des 3,4-MB-Bildes** (`sc > bestScore`, `dma.cpp:500-508`) → das **niedrigste** zufällig passende Offset gewinnt.
+* Es fehlen zwei Kriterien: **Idle-Stabilität** und **Exklusivität** (nur die gedrückten Bits dürfen sich ändern).
+
+### 5.3 Warum beliebige Tasten und **Mausbewegung** reagieren
+Weil `remoteDown(key)` aus Zählerbits kommt (Flappen im 250-ms-Takt) → `held` (trigger.cpp:855-856) pulsiert → Trigger/Refire feuert; Mausbewegung selbst ändert das Fenster nicht, sie *korreliert*, weil der Zähler permanent läuft (die Region enthält viele Zähler-/Zeitfelder: bytes 2/9/13/25/29 konstant, 16-19 Zähler).
+
+### 5.4 `PAUSE (0x45)`
+`radar.cpp:1206`: `MapVirtualKeyA(k, MAPVK_VK_TO_CHAR)` liefert für Buchstaben den **Zeichencode** (0x45), dieser wird aber als **Scancode** in `GetKeyNameTextA(sc << 16)` gesteckt → Scancode 0x45 = **„Pause"**. Reiner Namensauflösungs-Bug (präexistent, nicht DMA); die Hex-Anzeige `0x45` ist der korrekte VK.
+
+### 5.5 Was das Original-Bind beeinträchtigt hat
+* Vorher (`keyEnable_=false`) war `remoteDown` immer `false` → Bind ausschließlich über Box + lokal ✔.
+* Jetzt liefert die Remote-Seite **Phantom-Bits**: `captureTick()` bindet den ersten „steigenden" VK (trigger.cpp:718-724) — ein Zufallswert (0x0B/0x34/0x4A …); `keyLabel` zeigt Nonsens; `justBound()` (450 ms, trigger.cpp:759) koppelt daran die Chip-/Stop-Logik der UI.
+* Verschärft durch meine Änderungen: **B** (Pfad aktiv) + **A1** (nach „confirmed" ist der falsche VA *sticky*; Re-Verifikation nur bei Read-Fehlern, die hier nie auftreten).
+
+### 5.6 Ursachenrangliste
+1. **Such-/Verifikationsmodell zu schwach** (Idle-Stabilität + Exklusivität fehlen) → falscher VA (Hauptursache, Beweis A+B).
+2. **Layout-/Strukturannahme unbewiesen** (2 Bit/VK in 64 B); die Fundregion enthält gar keine Bitmap.
+3. **„ready"/„confirmed" ≠ korrekt** (Log-Semantik zu optimistisch).
+4. `keyLabel`-Bug (`PAUSE`) — unabhängig, präexistent.
+5. **Bind akzeptiert unverifizierte Remote-Bits** (keine Sperre bis „verifiziert").
+
+### 5.7 Isolierte Tests, die die Ursachen trennen (rein lesend)
+| Test | Ziel | Vorgehen | Unterscheidet |
+|---|---|---|---|
+| **T-A** | Idle-Stabilität | gleiche VA, 2 Samples à 250 ms diffen | Zähler/Zeitfelder vs. Bitmap |
+| **T-B** | Exklusivität | nur E halten; ändern sich *nur* die erwarteten Bytes? | Region mit echter Bitmap |
+| **T-C** | Trennschärfe E↔W | E allein vs. W allein; Byte-Distanz messen | Layout (2Bit=4 B, 1Bit=3 B, 2B/VK=72 B, 4B/VK=36 B) |
+| **T-D** | Maus/Bewegung | nur Maus bewegen, Box-Pulse aus | Bewegungsfelder vs. Tastatur |
+| **T-E** | Quellenisolation | `keyRemote=0` (ohne Rebuild) vs. 1 | ist die Regression rein remote? |
+| **T-F** | MAKCU getrennt | COM3 trennen, Decode prüfen | erfundene Eingaben |
+
+### 5.8 Reparaturplan (Reihenfolge, je mit Test + Rückweg; src/ erst nach Beleg)
+| # | Änderung | Test | Rückweg |
+|---|---|---|---|
+| P1 | **Verifikation härten**: Kandidat nur akzeptieren, wenn im Idle stabil **und** exklusiv auf Druck reagierend **und** 2 Runden dieselbe Adresse | T-A/T-B → dann live | Block zurücknehmen |
+| P2 | **Layout/Struktur** nach T-C korrigieren (Stride/2-Bit, Fenstergröße) | T-C | Konstante zurück |
+| P3 | **Bind-Sperre**: Remote-Bits binden erst, wenn verifiziert; bis dahin Box+local unverändert | T-E + Bind-Test | Bedingung in `captureTick` zurück |
+| P4 | `keyLabel`: `MAPVK_VK_TO_VSC` (+ Extended-Bit) statt `MAPVK_VK_TO_CHAR` | Label E/W/Shift | 1 Zeile |
+| P5 | `keyarray.txt` nur verifiziert persistieren | Restart-Test | Bedingung |
+
+### 5.10 Beweis C — automatischer Diskriminator (`keyprobe find`, rein lesend, 21:12/21:14)
+
+Neu in `tools/keyprobe.cpp` (kein `src/`-Eingriff): `find` liest das win32kbase-Bild **zweimal im Idle** (250 ms Abstand) → markiert *instabile* Bytes (Zähler/Zeitfelder), pulst dann LMB/RMB/MMB über die Box und meldet nur noch **stabile** Bytes, die reagieren, plus ob sie nach dem Loslassen **zurückkehren**.
+
+```
+=== FIND read-only: ctx=0x4 win32kbase.sys base=0xFFFFF8073E9D0000 size=0x345000 ===
+idle-stability: 3428351 of 3428352 bytes stable, 1 unstable   <- first unstable offset: 2AEAE8
+LMB: 4 stable bytes changed, 0 revert -> 2AE2D0:4A>E5 2AE2D1:F2>6F 2AE2D2:86>CB 2AE2D3:68>75
+RMB: 4 stable bytes changed, 0 revert -> 2AE2D0:4A>7B … (gleiche 4 Bytes)
+MMB: 4 stable bytes changed, 0 revert -> 2AE2D0:4A>5C … (gleiche 4 Bytes)
+pdb window (base+rva, 192 bytes): 0 bytes react to the pulses
+```
+(ctx `0x80000548`, also der von der App gewählte, liefert dasselbe Bild.)
+
+**Interpretation (belegt):**
+1. Das Bild ist praktisch vollständig idle-stabil; **genau 1 Byte** (0x2AEAE8) ist instabil → dort liegt ein **ms-Zähler** (Bytes 0x2AEAE7..EA; nur das niederwertigste Byte ändert sich innerhalb 250 ms). Genau dieser Bereich ist die App-VA `0x2AEAD7` = **falsch gewählt**.
+2. Das einzige *puls-reaktive* Feld sind **4 Bytes ab 0x2AE2D0**, und zwar **identisch für LMB, RMB und MMB**, jeweils als kompletter 32-Bit-Wert (~0x94B78C96 → 0xA919D101) und **ohne Rückkehr** nach dem Loslassen → das ist ein **„letzter Eingabe-Zeitstempel"**, **kein** Per-Tasten-Bitmap.
+3. Das `MATCH` von `find` ist deshalb *schwach*: aus 32 Zeitstempel-Bits lassen sich viele Layout-/Basis-Kombinationen „beweisen“ (Report-Warnung war also berechtigt).
+
+**Damit bleiben für die echte Tastaturbitmap genau zwei Erklärungen, und sie sind trennbar:**
+* **(A) Die Box-Pulse (`km.left/right/middle`) erzeugen im Ziel keinen echten Tastenwechsel** (z. B. nur Bewegung/anderer HID-Pfad) → dann ist nur ein *menschlicher* Tastendruck geeignet.
+* **(B) Das Array liegt außerhalb dieses Bildes/Contexts** (Session-Space-Kopie oder anderes Modul) → dann muss über Module/Contexts/Session-Fenster gesucht werden.
+
+**Unterscheidung = `keyprobe.exe ekey`** (existiert, rein lesend, Box unberührt): Pieps-Führung, E und W am Gaming-PC halten/loslassen, 3 Runden. Findet es saubere, stabile Bits auf der Modell-Distanz → (A) widerlegt, Region gefunden. Findet es **nichts** → (B) gilt, und die Suche muss auf andere Module/Contexts/Session-Fenster ausgeweitet werden.
+
+### 5.9 Merksätze (Anti-Loop, verschärft)
+
+* Eine Speicheränderung ist **kein** Tastendruck. „ready"/„confirmed" ist **kein** Beweis.
+* Ohne Idle-Stabilität + Exklusivität ist jede Offset-Suche in einem 3-MB-Bild ein Münzwurf.
+* Erst Diagnose (T-A…T-C) → dann Offset → dann Dekode → **erst zuletzt** Bind/Trigger anhängen.
+* Nach 2 erfolglosen Versuchen: Diagnose aktualisieren (diese Datei), nicht neu würfeln.
+
+
 ## 6. Änderungsprotokoll (wird gefüllt, sobald implementiert wird)
 
 | # | Hypothese | Änderung (Datei:Zeile) | Erwartung | Ergebnis | Beleg | Lernen | Rückweg |

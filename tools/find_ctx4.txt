@@ -1,0 +1,14 @@
+keyprobe mode=find port=COM3 dll=C:\Users\Admin\Documents\Ickza-DMA\build\dma module=win32kbase.sys
+[ok] loaded C:\Users\Admin\Documents\Ickza-DMA\build\dma\vmm.dll
+[ok] VMM initialized
+[box] reply: km.MAKCU>>> 
+processes: 336
+=== FIND read-only: ctx=0x4 win32kbase.sys base=0xFFFFF8073E9D0000 size=0x345000 ===
+idle-stability: 3428351 of 3428352 bytes stable, 1 unstable (counters/timers/timestamps)
+  first unstable offsets: 2AEAE8 
+LMB: 4 stable bytes changed, 0 revert -> 2AE2D0:4A>E5 2AE2D1:F2>6F 2AE2D2:86>CB 2AE2D3:68>75 
+RMB: 4 stable bytes changed, 0 revert -> 2AE2D0:4A>7B 2AE2D1:F2>90 2AE2D2:86>C1 2AE2D3:68>D8 
+MMB: 4 stable bytes changed, 0 revert -> 2AE2D0:4A>5C 2AE2D1:F2>42 2AE2D2:86>79 2AE2D3:68>42 
+MATCH layout=twoBitHigh arrayBase=0xFFFFF8073EC7E2D1 ctx=0x4 win32kbase.sys | byte=(vk*2)/8 bit=(vk%4)*2+1
+pdb window (base+rva, 192 bytes): 0 bytes react to the pulses
+done.

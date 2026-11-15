@@ -2,7 +2,8 @@
 // Ground truth comes from the MAKCU/box (km.left/right/middle). Symbol independent.
 //
 // Build: tools\build_keyprobe.bat   (produces tools\keyprobe.exe)
-// Usage: keyprobe.exe [probe|scan|dump] [--dll DIR] [--port COM3] [--module win32kbase.sys]
+// Usage: keyprobe.exe [probe|scan|scanall|env|ekey|find] [--dll DIR] [--port COM3] [--module win32kbase.sys] [--ctx N]
+//   find = automatic read-only discriminator: idle-stability vs. box pulses (no human needed)
 //
 // The DMA card + COM port must be free (no Ickza.exe / MemProcFS running).
 #include <windows.h>
@@ -697,13 +698,129 @@ static void doEKey(DWORD ctx, const char* module, int k1, int k2, int rounds) {
     if (!any) lg("KEIN Layout-Match - Kandidaten oben pruefen");
 }
 
+// ------------------------------------------------------------------ automatic finder (read-only + box pulses)
+// Discriminates counters/timers (unstable while idle) from a key bitmap (stable while idle, reacts to a press).
+// Ground truth = MAKCU pulses on the MAIN pc -> no human needed. Read-only: only VMMDLL_MemReadEx.
+static void doFind(DWORD ctx, const char* module) {
+    const ULONG64 base = modBase(ctx, module);
+    if (!base) { lg("find: no base for %s in ctx 0x%lX", module, (unsigned long)ctx); return; }
+    uint32_t size = 0x400000;
+    if (VMMDLL_Map_GetModuleFromNameU) {
+        PVMMDLL_MAP_MODULEENTRY e = nullptr;
+        if (VMMDLL_Map_GetModuleFromNameU(gVmm, ctx, module, &e, 0) && e) {
+            if (e->cbImageSize) size = e->cbImageSize;
+            VMMDLL_MemFree(e);
+        }
+    }
+    lg("=== FIND read-only: ctx=0x%lX %s base=0x%llX size=0x%X ===", (unsigned long)ctx, module, (unsigned long long)base, size);
+    std::vector<uint8_t> A, B;
+    if (!readImg(ctx, base, size, A)) { lg("read A failed"); return; }
+    Sleep(250);
+    if (!readImg(ctx, base, size, B)) { lg("read B failed"); return; }
+    std::vector<uint8_t> stable(size);
+    size_t nUn = 0;
+    for (size_t i = 0; i < size; ++i) {
+        stable[i] = A[i] == B[i];
+        if (!stable[i]) ++nUn;
+    }
+    lg("idle-stability: %zu of %zu bytes stable, %zu unstable (counters/timers/timestamps)", size - nUn, size, nUn);
+    {
+        std::string s;
+        size_t shown = 0;
+        for (size_t i = 0; i < size && shown < 24; ++i)
+            if (!stable[i]) {
+                char t[24];
+                std::snprintf(t, sizeof t, "%zX ", i);
+                s += t;
+                ++shown;
+            }
+        lg("  first unstable offsets: %s", s.c_str());
+    }
+
+    struct Hit {
+        size_t off;
+        uint8_t mask;
+        bool reverts;
+    };
+    static const char* pcmd[3] = {"km.left", "km.right", "km.middle"};
+    static const char* pname[3] = {"LMB", "RMB", "MMB"};
+    std::vector<Hit> hits[3];
+    for (int p = 0; p < 3; ++p) {
+        char down[32], up[32];
+        std::snprintf(down, sizeof down, "%s(1)\r\n", pcmd[p]);
+        std::snprintf(up, sizeof up, "%s(0)\r\n", pcmd[p]);
+        gBox.send(down);
+        Sleep(DWELL);
+        std::vector<uint8_t> P;
+        if (!readImg(ctx, base, size, P)) { lg("read P(%s) failed", pname[p]); continue; }
+        gBox.send(up);
+        Sleep(DWELL * 2);
+        std::vector<uint8_t> R;
+        if (!readImg(ctx, base, size, R)) { lg("read R(%s) failed", pname[p]); continue; }
+        for (size_t i = 0; i < size; ++i) {
+            if (!stable[i]) continue;  // counters are excluded by definition
+            const uint8_t d = (uint8_t)(B[i] ^ P[i]);
+            if (d) hits[p].push_back({i, d, R[i] == B[i]});
+        }
+        std::string s;
+        size_t rev = 0;
+        for (size_t k = 0; k < hits[p].size(); ++k) {
+            if (hits[p][k].reverts) ++rev;
+            if (k < 16) {
+                char t[40];
+                std::snprintf(t, sizeof t, "%zX:%02X>%02X%s ", hits[p][k].off, B[hits[p][k].off], (uint8_t)(B[hits[p][k].off] ^ hits[p][k].mask),
+                              hits[p][k].reverts ? "(rev)" : "");
+                s += t;
+            }
+        }
+        lg("%s: %zu stable bytes changed, %zu revert -> %s", pname[p], hits[p].size(), rev, s.c_str());
+    }
+
+    bool any = false;
+    for (const Layout& L : LAY) {
+        const int off[3] = {L.o1, L.o2, L.o4};
+        const int bts[3] = {L.b1, L.b2, L.b4};
+        for (const Hit& h1 : hits[0]) {
+            if (!(h1.mask & (1u << bts[0]))) continue;
+            const int64_t delta = (int64_t)h1.off - off[0];
+            bool ok = true;
+            for (int p = 1; p < 3 && ok; ++p) {
+                bool found = false;
+                for (const Hit& h : hits[p])
+                    if ((int64_t)h.off - off[p] == delta && (h.mask & (1u << bts[p]))) { found = true; break; }
+                if (!found) ok = false;
+            }
+            if (ok) {
+                lg("MATCH layout=%s arrayBase=0x%llX ctx=0x%lX %s | %s", L.name, (unsigned long long)(base + delta), (unsigned long)ctx, module, L.map);
+                any = true;
+            }
+        }
+    }
+    if (!any) lg("no layout match from LMB/RMB/MMB on stable bytes");
+
+    ULONG64 rva = 0;
+    std::string mod;
+    if (pdbRva(ctx, base, "gafAsyncKeyState", rva, mod)) {
+        Samples s;
+        if (grab(ctx, base + rva, 192, s)) {
+            int n = 0;
+            for (size_t i = 0; i < 192; ++i)
+                if (s.idle[i] != s.lmb[i] || s.idle[i] != s.rmbb[i] || s.idle[i] != s.mmbb[i]) {
+                    lg("  pdb-window off=0x%zX idle=%02X lmb=%02X rmb=%02X mmb=%02X", i, s.idle[i], s.lmb[i], s.rmbb[i], s.mmbb[i]);
+                    ++n;
+                }
+            lg("pdb window (base+rva, 192 bytes): %d bytes react to the pulses", n);
+        }
+    }
+}
+
 int main(int argc, char** argv) {
     std::string mode = "probe", port = "COM3", dllDir = exeDir(), module = "win32kbase.sys";
     DWORD onlyCtx = (DWORD)-1;
     int rounds = 3, key1 = 0x45, key2 = 0x57;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
-        if (a == "probe" || a == "scan" || a == "scanall" || a == "env" || a == "ekey") mode = a;
+        if (a == "probe" || a == "scan" || a == "scanall" || a == "env" || a == "ekey" || a == "find") mode = a;
         else if (a == "--port" && i + 1 < argc) port = argv[++i];
         else if (a == "--dll" && i + 1 < argc) dllDir = argv[++i];
         else if (a == "--module" && i + 1 < argc) module = argv[++i];
@@ -775,6 +892,8 @@ int main(int argc, char** argv) {
             scanOne(4, module.c_str());
         else
             scanOne(onlyCtx, module.c_str());
+    } else if (mode == "find") {
+        doFind(onlyCtx == (DWORD)-1 ? 4 : onlyCtx, module.c_str());
     } else if (mode == "env") {
         doProbe(procs, false);
     } else if (mode == "ekey") {
