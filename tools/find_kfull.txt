@@ -1,0 +1,13 @@
+keyprobe mode=find port=COM3 dll=C:\Users\Admin\Documents\Ickza-DMA\build\dma module=win32kfull.sys
+[ok] loaded C:\Users\Admin\Documents\Ickza-DMA\build\dma\vmm.dll
+[ok] VMM initialized
+[box] reply: km.MAKCU>>> 
+processes: 337
+=== FIND read-only: ctx=0x4 win32kfull.sys base=0xFFFFF8073E200000 size=0x434000 ===
+idle-stability: 4407296 of 4407296 bytes stable, 0 unstable (counters/timers/timestamps)
+  first unstable offsets: 
+LMB: 0 stable bytes changed, 0 revert -> 
+RMB: 0 stable bytes changed, 0 revert -> 
+MMB: 0 stable bytes changed, 0 revert -> 
+no layout match from LMB/RMB/MMB on stable bytes
+done.
