@@ -379,6 +379,7 @@ private:
     mutable bool keyLayout1_ = false;
     mutable int refineTries_ = 0;
     mutable int keyFailN_ = 0;  // consecutive failed key reads -> re-verify after 3
+    mutable int keyScanRounds_ = 0;  // cheap scan rounds without a hit -> then one full-image refine pass
     mutable uint64_t lastRefAddr_ = 0;
     mutable bool lastRefLayout1_ = false;
 
@@ -465,20 +466,20 @@ private:
         };
         const uint64_t pref = keyState_;
         for (const auto& k : keyCands2_)  // preferred: image of the tentative candidate
-            if (k.how[0] == 's' && k.size && k.addr == pref) {
+            if (k.size && k.addr == pref) {
                 addRef(k);
                 break;
             }
         for (const auto& k : keyCands2_) {
             if (refBase_.size() >= 6) break;
-            if (k.how[0] != 's' || !k.size) continue;
+            if (!k.size) continue;  // needs a known image size (set for pdb/mod/scan candidates)
             ++seen;
             if (k.addr == pref) continue;
             addRef(k);
         }
         if (gKeyLog) {
             char s[176];
-            std::snprintf(s, sizeof s, "[trg] refine armed %zu images (of %d scan cands) in %.0f ms - HOLD the keys", refBase_.size(), seen,
+            std::snprintf(s, sizeof s, "[trg] refine armed %zu images (of %d cands) in %.0f ms - HOLD the keys", refBase_.size(), seen,
                           (qpcUs() - armT0) / 1000.0);
             gKeyLog(s);
         }
@@ -972,14 +973,17 @@ private:
                 }
                 return;
             }
-            if (++refineTries_ >= 6) {  // bounded: keep the tentative candidate, stop the work
-                keyPhase_ = 5;
+            if (++refineTries_ >= 6) {  // no confirmation -> back to the cheap watch loop (not "stop")
+                keyScanRounds_ = 0;
+                keyPhase_ = 0;
+                keyPhaseAt_ = now;
                 if (gKeyLog) {
                     char s[128];
-                    std::snprintf(s, sizeof s, "[trg] refine gave up after %d tries (%.0f ms) - tentative candidate kept", refineTries_,
+                    std::snprintf(s, sizeof s, "[trg] refine gave up after %d tries (%.0f ms) - back to key watch", refineTries_,
                                   (qpcUs() - t0) / 1000.0);
                     gKeyLog(s);
                 }
+                findKey();
                 return;
             }
             refineArm();
@@ -1048,6 +1052,7 @@ private:
             keyPrevValid_ = false;
             keyInfo_ = std::string("tentative via ") + keyHow_;
             refineTries_ = 0;
+            keyScanRounds_ = 0;
             keyPhase_ = 4;      // let the differential search confirm the exact offset
             keyPhaseAt_ = now;
             refineArm();
@@ -1059,10 +1064,20 @@ private:
             std::snprintf(s, sizeof s, "[trg] keyscan no hit (new=%d down=%d) - re-arm, keep pressing", bestNew, bestDown);
             gKeyLog(s);
         }
-        refineTries_ = 0;
-        keyPhase_ = 4;      // next: differential search inside the session image
+        // nothing was pressed -> stay in the cheap 7-key watch loop (12 x 64 byte reads per 5 s).
+        // Every 3rd round give the full-image differential a chance: it finds the array inside the
+        // image even if the candidate VA (PDB rva) is off, which is the case on some builds.
+        if (++keyScanRounds_ >= 3) {
+            keyScanRounds_ = 0;
+            refineTries_ = 0;
+            keyPhase_ = 4;
+            keyPhaseAt_ = now;
+            refineArm();
+            return;
+        }
+        keyPhase_ = 0;
         keyPhaseAt_ = now;
-        refineArm();
+        findKey();
         return;
     }
 

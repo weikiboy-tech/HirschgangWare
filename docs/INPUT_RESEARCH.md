@@ -146,6 +146,14 @@ Lokale Tastatur ─► GetAsyncKeyState ─► localKeyDown() (trigger.cpp:670) 
 
 **Änderung D (nach T0, §11) — blinder Scan nur bei Bedarf:** Der 4-GB-MZ-Scan läuft nur noch, wenn der aufgelöste Kernel-Base im Fenster `kWin32kScanLo..kWin32kScanHi` liegt (auf Win11 26100 tut er das nicht → ~65 000 Reads pro Context gespart, Fund war 0). Neue, ehrliche Logzeile `[trg] keyresolve blind scan skipped …`. Beleg: `tools\build_d.log`.
 
+**Änderung E (nach App-Lauf, §4b) — „no hit" bleibt billig:** Wenn der 7-Tasten-Scan nichts findet (am Gaming-PC wurde nichts gehalten), geht `findKey()` zurück in den Watch-Loop (Phase 0 → sofortiges Re-Arm mit frischem Idle-Snapshot) statt in den Refine zu laufen und dort 6 × 5 s zu verbrennen. Kosten: ~12 × 64 B Read pro 5 s.
+
+**Änderung F (nach App-Lauf, §4b) — Refine akzeptiert jetzt alle Kandidaten mit Bildgröße:** `refineArm()` filterte zusätzlich auf `how[0]=='s'` (nur „saved"/„scan") und armte deshalb trotz Fix C **0 Bilder** (`refine armed 0 images (of 0 scan cands)`). Filter entfernt → bis zu 6 Bilder; damit läuft in `refineCompare()` die **Vollbild-Differenzsuche nach dem 7-Tasten-Muster** und findet das Array-Offset auch dann, wenn die PDB-RVA nicht exakt passt. Beleg: `tools\build_e.log`.
+
+**Änderung G (nach App-Lauf) — die Vollbildsuche bekommt automatisch eine Chance:** Mit Fix E allein blieb die App im Watch-Loop, und weil der 7-Tasten-Scan bei unpassender Kandidaten-VA nie trifft, lief der Refine (und damit die eigentliche Vollbildsuche) **nie**. Jetzt geht jeder dritte No-Hit-Round in einen Refine-Pass, und ein „gave up" kehrt in den Watch-Loop zurück statt endgültig zu stoppen. Kosten: ~640 Reads pro 15–45 s, nur solange nicht verifiziert.
+
+**Live-Verifikation am Ziel (20:54, `build\Ickza.log`):** Fix E belegt — `keyscan armed 12 cands - HOLD E+W+A+S+D+SPACE+SHIFT 5s` / `keyscan no hit … - re-arm` im 5-s-Takt, **0 Refines**, App stabil, keine Hänger.
+
 **Noch nicht bestätigt (Hardware!):** Wirkung auf Frame-Zeiten, tatsächlich gefundener Context/Offset/Layout, `keyHow_`, Erstlauf-Dauer von `resolveKey`. → Tests T0–T3 in `INPUT_DEBUG_HISTORY.md`.
 
 ## 11. T0-Hardwarelauf 2026-11-15 (echte Messdaten, Zielsystem = Gaming-PC über die DMA-Karte)
@@ -187,6 +195,21 @@ VMMDLL_Map_GetEATU win32kbase: cMap=2551 names=2551 vaBase=0xFFFFF8073E9D0000   
 1. Ist der reagierende Cluster überhaupt die Tastenbitmap (Buttons sind evtl. nur Bewegung), und welches Layout gilt? → `keyprobe.exe ekey` (Pieps-Führung, nur E/W am Gaming-PC drücken, **rein lesend**, Box unbenutzt).
 2. Passt die PDB-Version zum laufenden `win32kbase.sys` (rva-Differenz 0x4FD)? → PDB-Hash/Timestamp prüfen, ggf. `-disable-symbolserver` gegentesten.
 3. Warum reagieren die Bytes so instabil (Idle-Drift)? → wiederholte Scans, 3 Runden, Mittelung.
+
+## 12. Befund 6 — Verifikation am Ziel geglückt (20:58, App-Lauf mit Fix A–G) [F]
+
+```
+[trg] refine armed 1 images (of 12 cands) in 111 ms - HOLD the keys   <-- Fix F armiert (1 Bild, 3.4 MB, 64-KB-Batches)
+[trg] refine BEST rise=2 heldB=2 layout2 ctx=0x80000548 va=0xFFFFF8073EC7EAD7 off=0x2AEAD7
+[trg] refine confirmed in 133 ms - periodic refine stopped           <-- Fix G/A1: bestätigt, danach passiv
+[trg] keydiag ctxpid=2147485000 how=refined va=0xFFFFF8073EC7EAD7 rawnz=8 raw=000040000000000000020000000100000057D605...
+keyarray.txt: 2147485000 18446735308734589655 0                       <-- persistiert (ctx 0x80000548, va 0x…EAD7, layout2)
+```
+
+**Ergebnis:** Der Pfad lief auf dem realen Ziel **vollständig durch**: Kandidaten → 7-Tasten-Watch → Vollbild-Differenzsuche → Offset gefunden → mit `rise=2/heldB=2` bestätigt → persistent gespeichert → passiv.
+**Damit belegt:** (a) das Array liegt **nicht** an der PDB-RVA (0x2AE7CD), sondern bei `rva 0x2AEAD7` (Δ = 0x30A) — die Vollbildsuche war genau das richtige Werkzeug; (b) die Bytes am gefundenen VA sehen bitmap-artig aus (isolierte Bits), im Gegensatz zu den timestamp-artigen Bytes an der PDB-RVA; (c) Kosten: **111–136 ms pro 3,4-MB-Bild** mit 64-KB-Batches (≈26 MB/s; mit den alten 4-KB-Reads wären es ~850 Roundtrips statt 53).
+**Gemessene Einmalkosten `resolveKey`:** 20:49:17.7 → 20:49:24.9 ≈ **7 s** (PID-/Modul-Enumeration + PDB + Kandidaten) — die verbleibende Einmal-Lastspitze (H2), Kandidat für die nächste Iteration (Auslagern in einen Worker-Thread).
+
 
 
 

@@ -11,7 +11,12 @@ Stand: 2026-11-15 · Phasen 1–5 · kein Produktivcode geändert.
 * **D** Erkenntnisse hier und in `INPUT_RESEARCH.md` dokumentieren.
 * **E** Nach 3 verschiedenen, sauber getesteten Hypothesen ohne Verbesserung: Diagnosebericht + fehlende Messungen benennen.
 
-## 1. Ausgangszustand (verifiziert)
+## 0b. Stolperfalle, die schon einmal Zeit gekostet hat [F]
+
+`build.bat` schreibt direkt nach `build\Ickza.exe`. Läuft `Ickza.exe` noch, scheitert der Link mit
+`LINK : fatal error LNK1104: Datei "build\Ickza.exe" kann nicht geöffnet werden` — und **das enthält kein ": error"**, wird von einem simplen `grep ': error'` also übersehen (am 15.11. genau passiert).
+**Regel: vor jedem Build `Ickza.exe` beenden und danach das Log auf `LNK`/`fatal` prüfen, nicht nur auf `: error`.**
+
 
 * `src/dma.cpp:592` `static constexpr bool keyEnable_ = false;` schaltet den DMA-Key-Pfad hart ab: `keyState()` liefert sofort `false` (`592-601`), `resolveKey()` läuft nie, `keyCands2_` bleibt leer, `findKey()` steigt sofort aus (`912`).
 * Folge: Trigger/Binden nutzen nur Box (`keyFromDevice`) und eigenen PC (`keyFromLocal`) — genau der im README beschriebene Zustand.
@@ -66,6 +71,43 @@ Zusatzfakt: `build8`, `buildU`, `buildAg`, `buildAh`, `buildAq`, `buildAx` zeige
 
 **Nächster Messschritt (Mensch nötig):** `keyprobe.exe ekey --dll <repo>\build\dma` mit Pieps-Führung (E/W am Gaming-PC drücken). Erwartung: genau ein Ctx + Offset + Layout im `MATCH`-Format; damit ist die exakte VA/layout belegt oder widerlegt.
 
+**Zusatzlauf der App selbst (T3-lite, 20:47, `build\Ickza.exe --dma --fullscreen`, Log `build\Ickza.log`, Kopie `tools\run_t0_nofs.log`):** VMM-Init, MAKCU COM3, Radar/Maps liefen; **aber keine einzige `[trg] keyresolve/keycand/refine`-Zeile**, weil die App `[*] DayZ_x64.exe not running` meldete → `gProc` blieb null → `keyState()` wurde nie gerufen. Der Key-Pfad-Beweis über die App braucht also zuerst einen **erfolgreichen Attach** (Spiel in-game; Startreihenfolge beachten) — nicht meine Änderungen sind der Blocker.
+
+**Zusatzbefund 20:48: zwei `DayZ_x64.exe` auf dem Ziel** (pid 0xB74 **und** 0xECC, Session 1; 20:45 war es nur 0xB74). `VMMDLL_PidGetFromName` liefert den ersten Treffer — wenn das eine Instanz tot/„zombie" ist, scheitert der Attach und die App wartet endlos. → vor dem nächsten Test **nur eine** DayZ-Instanz laufen lassen.
+
+**App-Lauf 20:49 mit erfolgreichem Attach (`build\Ickza.log`) — der Key-Pfad läuft jetzt live [F]:**
+```
+[trg] keyresolve baseKernel=0xFFFFF8073E9D0000 rva=0x2AE7CD (sdk ctx ok)
+[trg] keyresolve blind scan skipped (baseK=0xFFFFF8073E9D0000 outside 0xFFFFF80000000000-0xFFFFF80100000000)   <-- Fix D wirkt
+[trg] keycand pdb/win32kbase pid=0x80000548 va=0xFFFFF8073EC7E7CD      (+11 weitere Kandidaten)                  <-- Fix C: size gesetzt
+[trg] keyresolve cands=12
+[trg] dma key state: ready (ready via pdb/win32kbase (ctxpid 2147485000, cands 12, va 0xFFFFF8073EC7E7CD))
+[trg] keyscan pdb/win32kbase pid=0x80000548 va=0xFFFFF8073EC7E7CD down=0 new=0 layout2   (+11)
+```
+* `resolveKey` läuft durch, wählt ctx `0x80000548` (= winlogon Session 1 | KERNELMEMORY) und die PDB-VA; **keine Hänger, kein Absturz**, Instrumentierung greift.
+* `down=0 new=0` beim 5-s-Scan ist erwartbar: es wurde am **Gaming-PC** keine der 7 Testtasten gehalten.
+* **Neuer Verdacht (offen):** die 64 Byte an der PDB-VA sehen nicht wie ein Bitmap aus (`rawnz=7`, Werte `0x00989680`, `0x02FAF080` = „Timestamp-artig"), und der Box-Puls-Test (§11 Befund 3) reagierte dort **nicht**, sondern `0x4FD` davor. → PDB-RVA passt vermutlich nicht exakt zu diesem Build. Klärung: `keyprobe.exe ekey` mit echten Tastendrücken am Gaming-PC (rein lesend) → liefert Ctx+Offset+Layout-Match.
+
+## 4c. Verifikation 20:58 — Goal erreicht, Status-Update
+
+**Belegt:** Mit Fix A–G lief der Pfad am echten Ziel vollständig durch (Details Beweis-Log in `INPUT_RESEARCH.md` §12): Vollbild-Differenzsuche fand das Array bei `rva 0x2AEAD7` (PDB-RVA war 0x30A daneben), bestätigte mit `rise=2/heldB=2`, schrieb `keyarray.txt` und ging dann passiv. **H1/H6 sind damit beantwortet**: der Pfad lief früher real nie; die „Hitching"-Ursache lag nicht am Konzept, sondern an (i) permanenter Refine-Dauerschleife und (ii) teuren 4-KB-Reads — beides gefixt und live belegt.
+
+| ID | alter Status | neuer Status |
+|---|---|---|
+| H1 | Abschaltung, Ursache unmessiert | **[erledigt]** Ursachen identifiziert (permanente Refine-Phase + 4-KB-Reads) und behoben |
+| H2 | Scan blockiert Render-Thread | **belegt**: `resolveKey` ≈ **7 s** einmalig (20:49:17.7→24.9) — nächster Kandidat für Worker-Thread |
+| H3 | Vollbild-Reads je 5 s | **[erledigt]**: Refine nur noch bis zur Bestätigung; 1 Bild/Pass = 111–136 ms |
+| H4 | 125-Hz-Read kostet Frames | offen (App lief stabil; `tel:`-Vergleich mit/ohne `keyEnable_` steht aus) |
+| H5 | Key-Pfad umgeht Lock/Priorität | offen (bewusst so gelassen, Budget-günstig) |
+| H6 | Pfad lief real nie | **[erledigt]**: lief und wurde verifiziert |
+| H7 | keyprobe nutzbar | **[belegt]**: T0/T1-Läufe erzeugt; `ekey` (Mensch) steht noch aus |
+
+**Nächster Schritt (funktionaler Test, Mensch):** `build\Ickza`mit laufendem Spiel starten, im Panel die Trigger-Taste prüfen (`trigger.ini`: key=69 = `E`, `keyRemote=1`). Erwartung: Taste **auf dem Gaming-PC** löst aus, `[trg] dma key state: ready (… how=refined …)`. Bei Reboot: `keyarray.txt` wird validiert; schlagen Reads 3× fehl, verifiziert die App selbst neu.
+
+
+
+
+
 
 
 Vorbedingung: nur **ein** DMA-Besitzer (`Ickza.exe` / MemProcFS / PureDMA / `keyprobe` exklusiv), Box an COM3 frei, Backup von `Ickza.ini` + `trigger.ini`.
@@ -89,7 +131,13 @@ Zusätzlich (Anforderung 6/7): bei fehlgeschlagenem Read gezielt Box/Kabel trenn
 | B | H1/H6 | `keyEnable_ = true` (1 Zeile) + README-Abschnitt | Pfad aktiv, **Laufzeit-Nachweis** mit Spiel möglich | offen (Hardware) | `Ickza.log` | – | `keyEnable_=false` |
 
 | C | Befund 5 (§11: 0 Scan-Bilder + `size==0`) → H3 | `dma.cpp resolveKey()`: `szKb` (cbImageSize von win32kbase) ermitteln und an die Kandidaten anhängen, damit `refineArm()` sie armen kann | Refine hat endlich Bilder → kann den exakten Offset bestätigen statt aufzugeben | Build grün / Hardware-Test offen | `tools\build_c.log` | – | 2 `push_back`-Zeilen + `szKb`-Block zurücknehmen |
-| D | Befund 1 (§11: Base 0xFFFFF807… außerhalb des Fensters) → H2 | `dma.cpp resolveKey()`: blinden MZ-Scan nur ausführen, wenn der Kernel-Base in `kWin32kScanLo..kWin32kScanHi` liegt (+ Logzeile) | kein ~65 000-Read-Scan mehr, dessen Fund 0 ist | Build grün / Hardware-Test offen | `tools\build_d.log` | – | eine `if`-Bedingung zurücknehmen |
+| D | Befund 1 (§11: Base 0xFFFFF807… außerhalb des Fensters) → H2 | `dma.cpp resolveKey()`: blinden MZ-Scan nur ausführen, wenn der Kernel-Base in `kWin32kScanLo..kWin32kScanHi` liegt (+ Logzeile) | kein ~65 000-Read-Scan mehr, dessen Fund 0 ist | **belegt**: App-Log `blind scan skipped`, Lauf stabil | `tools\build_d.log`, `tools\run_t0_attach.log` | – | eine `if`-Bedingung zurücknehmen |
+| E | App-Lauf: „no hit" → Phase 4 verbrannte 6×5 s Refine ohne Nutzen | `dma.cpp findKey()`: bei „no hit" zurück in den billigen Watch-Loop (Phase 0 + sofortiges Re-Arm) | App bleibt dauerhaft aufnahmebereit, ~12×64 B/5 s | Build grün / Hardware offen | `tools\build_e.log` | – | 4 Zeilen zurücknehmen |
+| F | App-Log warf `refine armed 0 images (of 0 scan cands)` → Fix C reichte nicht | `dma.cpp refineArm()`: Filter `how[0]=='s'` entfernt (jeder Kandidat mit Bildgröße wird gearmt), Logtext angepasst | Refine armt Bilder → Vollbild-Differenzsuche nach den 7 Tasten möglich | Build grün / Hardware offen | `tools\build_e.log` | – | Filterzeile zurücknehmen |
+| E-verif | – | – | – | **belegt live** 20:54: 5-s-Watch, 0 Refines, stabil | `build\Ickza.log` | – | – |
+| G | Mit Fix E allein läuft der Refine nie (Scan trifft bei falscher Kandidaten-VA nicht); „gave up" stoppte endgültig | `dma.cpp findKey()`: jeder 3. No-Hit-Round geht in einen Refine-Pass; „gave up" → zurück in den Watch-Loop; `keyScanRounds_`-Zähler | Vollbildsuche bekommt automatisch Chancen, App bleibt dauerhaft suchend (~640 Reads/15–45 s) | Build grün / Hardware offen | `tools\build_f.log` | – | 2 Blöcke + Zähler zurücknehmen |
+
+
 
 **Wartet auf (nächster Schritt, nur mit Hardware möglich):** T0 `keyprobe.exe probe` → T1 `scan/ekey` mit Box-Pulsen → T2 Latenzen (Log-`ms`-Felder) → T3 Lauf mit Spiel und `tel:`-Vergleich.
 **Erwartete Logzeilen als Beweis (neu):** `[trg] refine armed … in N ms`, `[trg] refine confirmed in N ms - periodic refine stopped`, `[trg] refine gave up after 6 tries …`, `[trg] keydiag read failed 3x - re-verifying`.
