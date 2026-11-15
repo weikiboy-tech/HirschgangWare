@@ -5,6 +5,7 @@
 // Usage: keyprobe.exe [probe|scan|scanall|env|ekey|find] [--dll DIR] [--port COM3] [--module win32kbase.sys] [--ctx N]
 //   find   = automatic read-only discriminator: idle-stability vs. box pulses (no human needed)
 //   phases = human-guided read-only E/W test (beeps): counts beeps 1..6 = idle/E/release/W/release/move
+//   e      = SUPER SIMPLE: only key E by sound - HIGH beep = press+HOLD E, LOW beep = release (3 rounds)
 //
 // The DMA card + COM port must be free (no Ickza.exe / MemProcFS running).
 #include <windows.h>
@@ -897,6 +898,240 @@ static void doPhases(DWORD ctx, const char* module, ULONG64 va, size_t win, int 
     }
 }
 
+// ------------------------------------------------------------------ SUPER SIMPLE: find ONE key (E) by sound
+// HOCH = E druecken und HALTEN | TIEF = LOSLASSEN.  Read-only, Box unberuehrt.
+static void doFindE(DWORD ctx, const char* module, int rounds) {
+    const ULONG64 base = modBase(ctx, module);
+    if (!base) { lg("e: no base %s", module); return; }
+    uint32_t size = 0x400000;
+    if (VMMDLL_Map_GetModuleFromNameU) {
+        PVMMDLL_MAP_MODULEENTRY e = nullptr;
+        if (VMMDLL_Map_GetModuleFromNameU(gVmm, ctx, module, &e, 0) && e) {
+            if (e->cbImageSize) size = e->cbImageSize;
+            VMMDLL_MemFree(e);
+        }
+    }
+    lg("=== E-TEST (read-only, Box unberuehrt) ctx=0x%lX %s, %d Runden ===", (unsigned long)ctx, module, rounds);
+    lg("=== ABLAUF: 8x COUNTDOWN -> je Runde: HOHER Piep = E am GAMING-PC HALTEN (Box klickt automatisch mit), TIEFER Piep = E LOSLASSEN");
+    for (int i = 0; i < 8; ++i) {
+        Beep(900, 120);
+        Sleep(880);
+    }
+    Sleep(600);
+    std::vector<uint8_t> A, B;
+    if (!readImg(ctx, base, size, A)) { lg("read A failed"); return; }
+    Sleep(250);
+    if (!readImg(ctx, base, size, B)) { lg("read B failed"); return; }
+    std::vector<uint8_t> stableS(size);
+    for (size_t i = 0; i < size; ++i) stableS[i] = A[i] == B[i];
+
+    std::vector<uint8_t> holdSeen(size), relSeen(size), heldVal(size);
+    std::vector<uint8_t> holdOK(size, 0), relOK(size, 0);
+    std::vector<uint8_t> cur(size);
+    const size_t kArrive = 0x2AE2D0;  // known reactive field on this target (last-input timestamp, 4 bytes)
+    int arriveRounds = 0;
+    for (int r = 0; r < rounds; ++r) {
+        std::memset(holdSeen.data(), 0, size);
+        std::memset(relSeen.data(), 0, size);
+        Beep(1300, 300);
+        gBox.send("km.left(1)\r\n");  // box clicks too -> proves the read/input path (arrival proof)
+        ULONGLONG t0 = GetTickCount64();
+        size_t changes = 0;
+        while (GetTickCount64() - t0 < 2500) {
+            if (readImg(ctx, base, size, cur))
+                for (size_t i = 0; i < size; ++i)
+                    if (stableS[i] && cur[i] != A[i]) {
+                        holdSeen[i] = 1;
+                        heldVal[i] = cur[i];
+                        ++changes;
+                    }
+            Sleep(20);
+        }
+        size_t distinct = 0;
+        for (size_t i = 0; i < size; ++i) distinct += holdSeen[i] ? 1 : 0;
+        bool arrived = false;
+        for (size_t k = kArrive; k < kArrive + 4 && k < size; ++k)
+            if (holdSeen[k]) arrived = true;
+        if (arrived) ++arriveRounds;
+        Beep(700, 300);
+        gBox.send("km.left(0)\r\n");
+        t0 = GetTickCount64();
+        while (GetTickCount64() - t0 < 2500) {
+            if (readImg(ctx, base, size, cur))
+                for (size_t i = 0; i < size; ++i)
+                    if (stableS[i] && cur[i] == A[i]) relSeen[i] = 1;
+            Sleep(20);
+        }
+        for (size_t i = 0; i < size; ++i) {
+            if (holdSeen[i]) ++holdOK[i];
+            if (relSeen[i]) ++relOK[i];
+        }
+        lg("Runde %d/%d: %zu Bytes reagierten beim HALTEN (%zu Messpunkte, 0 = E nicht gedrueckt)", r + 1, rounds, distinct, changes);
+    }
+
+    struct Row {
+        size_t off;
+        int h, r;
+    };
+    std::vector<Row> rows;
+    for (size_t i = 0; i < size; ++i)
+        if (stableS[i] && holdOK[i] > 0) rows.push_back({i, holdOK[i], relOK[i]});
+    std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.h != b.h ? a.h > b.h : a.r > b.r; });
+    lg("Bytes, die waehrend HALTEN reagiert haben: %zu (Top 16):", rows.size());
+    for (size_t k = 0; k < rows.size() && k < 16; ++k)
+        lg("  +0x%zX  halten=%d/%d loslassen=%d/%d  idle=%02X gehalten=%02X diff=%02X", rows[k].off, rows[k].h, rounds, rows[k].r, rounds,
+           A[rows[k].off], heldVal[rows[k].off], (uint8_t)(A[rows[k].off] ^ heldVal[rows[k].off]));
+    if (rows.empty()) lg("  -> keine Reaktion beim Halten: wurde E wirklich am GAMING-PC gedrueckt?");
+    lg("INPUT-ANKUNFT am Ziel (bekanntes Reaktionsfeld +0x%zX): %d/%d Runden%s", kArrive, arriveRounds, rounds,
+       arriveRounds ? "" : "   <-- deine Tasten kamen NICHT am Ziel an (Tastatur am FALSCHEN PC?)");
+
+    const int need = rounds > 1 ? rounds - 1 : 1;  // tolerant: one missed round is ok
+    size_t nCand = 0;
+    int bestBit = -1, bestLayout = -1;
+    size_t bestOff = 0;
+    for (const Row& rw : rows) {
+        if (rw.h < need || rw.r < need) continue;
+        ++nCand;
+        const size_t i = rw.off;
+        for (size_t li = 0; li < sizeof(LAYF) / sizeof(LAYF[0]); ++li) {
+            const LayoutF& L = LAYF[li];
+            const int b = L.bitfn(0x45);
+            if (!((heldVal[i] >> b) & 1)) continue;
+            lg("MATCH layout=%s  E-Byte=+0x%zX Bit=%d  arrayBase=0x%llX  (%s)", L.name, i, b, (unsigned long long)(base + (int64_t)i - L.bytefn(0x45)),
+               L.map);
+            if (bestBit < 0) {
+                bestBit = b;
+                bestOff = i;
+                bestLayout = (int)li;
+            }
+        }
+    }
+    if (!nCand) {
+        lg("ERGEBNIS: E NICHT gefunden - Pieps verpasst? nochmal laufen lassen.");
+        return;
+    }
+    if (bestBit < 0) {
+        lg("ERGEBNIS: %zu Kandidaten, aber kein Layout passt zu E - Log schicken.", nCand);
+        return;
+    }
+    lg("VALIDIERUNG: nochmal hoher/tiefer Piep ...");
+    Beep(1300, 300);
+    Sleep(700);
+    std::vector<uint8_t> v(size);
+    bool hi = false, lo = false;
+    if (readImg(ctx, base, size, v)) hi = ((v[bestOff] >> bestBit) & 1) == 1;
+    Beep(700, 300);
+    Sleep(700);
+    if (readImg(ctx, base, size, v)) lo = ((v[bestOff] >> bestBit) & 1) == 0;
+    lg("ERGEBNIS: layout=%s arrayBase=0x%llX E-Byte=+0x%zX Bit=%d | beim Halten 1: %s, nach Loslassen 0: %s -> %s",
+       LAYF[bestLayout].name, (unsigned long long)(base + (int64_t)bestOff - LAYF[bestLayout].bytefn(0x45)), bestOff, bestBit,
+       hi ? "ja" : "NEIN", lo ? "ja" : "NEIN", (hi && lo) ? "E GEFUNDEN + BESTAETIGT" : "noch nicht stabil - nochmal");
+}
+
+// ------------------------------------------------------------------ TAP TEST: 1 sound, tap E fast several times
+// Criterion: a tapped key byte toggles between exactly TWO values many times.
+// A counter/timer takes many DIFFERENT values, a timestamp does not return.
+static void doTapE(DWORD ctx, const char* module, int rounds) {
+    const ULONG64 base = modBase(ctx, module);
+    if (!base) { lg("e2: no base %s", module); return; }
+    uint32_t size = 0x400000;
+    if (VMMDLL_Map_GetModuleFromNameU) {
+        PVMMDLL_MAP_MODULEENTRY e = nullptr;
+        if (VMMDLL_Map_GetModuleFromNameU(gVmm, ctx, module, &e, 0) && e) {
+            if (e->cbImageSize) size = e->cbImageSize;
+            VMMDLL_MemFree(e);
+        }
+    }
+    lg("=== E-TIPP-TEST (read-only) ctx=0x%lX %s, %d Fenster ===", (unsigned long)ctx, module, rounds);
+    lg("=== gleich: 1 LANGER HELLER Piep = E SCHNELL MEHRMALS TIPPEN (10 s), danach kurzer tiefer Piep = Stop ===");
+    std::vector<uint8_t> A, cur;
+    if (!readImg(ctx, base, size, A)) { lg("read A failed"); return; }
+    std::vector<uint16_t> trans(size, 0);
+    std::vector<uint8_t> idle(size), alt(size), seenAlt(size, 0), third(size, 0);
+    for (size_t i = 0; i < size; ++i) idle[i] = A[i];
+    for (int r = 0; r < rounds; ++r) {
+        Beep(1600, 800);
+        std::vector<uint8_t> last(size);
+        std::memcpy(last.data(), A.data(), size);
+        const ULONGLONG t0 = GetTickCount64();
+        size_t samples = 0;
+        while (GetTickCount64() - t0 < 10000) {
+            if (readImg(ctx, base, size, cur)) {
+                ++samples;
+                for (size_t i = 0; i < size; ++i)
+                    if (cur[i] != last[i]) {
+                        if (trans[i] < 60000) ++trans[i];
+                        if (!seenAlt[i]) {
+                            seenAlt[i] = 1;
+                            alt[i] = cur[i];
+                        } else if (cur[i] != alt[i] && !third[i]) {
+                            third[i] = 1;
+                        }
+                        last[i] = cur[i];
+                    }
+            }
+            Sleep(5);
+        }
+        Beep(700, 400);
+        lg("Fenster %d/%d fertig (%zu Messpunkte)", r + 1, rounds, samples);
+    }
+    struct Row {
+        size_t off;
+        int t;
+        uint8_t a, b;
+    };
+    std::vector<Row> rows;
+    for (size_t i = 0; i < size; ++i)
+        if (trans[i] >= 4 && !third[i] && seenAlt[i]) rows.push_back({i, trans[i], idle[i], alt[i]});
+    std::sort(rows.begin(), rows.end(), [](const Row& x, const Row& y) { return x.t > y.t; });
+    lg("Bytes mit vielen Wechseln und nur 2 Werten (= getippte Taste): %zu (Top 16):", rows.size());
+    for (size_t k = 0; k < rows.size() && k < 16; ++k)
+        lg("  +0x%zX  wechsel=%d  idle=%02X tippen=%02X", rows[k].off, rows[k].t, rows[k].a, rows[k].b);
+    if (rows.empty()) lg("  -> nichts gefunden: kam der E-Tipp wirklich am Ziel an? (Tastatur am Gaming-PC)");
+
+    int bestBit = -1, bestLayout = -1;
+    size_t bestOff = 0;
+    for (const Row& rw : rows) {
+        for (size_t li = 0; li < sizeof(LAYF) / sizeof(LAYF[0]); ++li) {
+            const LayoutF& L = LAYF[li];
+            const int b = L.bitfn(0x45);
+            if (!((rw.b >> b) & 1)) continue;
+            lg("MATCH layout=%s  E-Byte=+0x%zX Bit=%d  arrayBase=0x%llX  (%s)", L.name, rw.off, b,
+               (unsigned long long)(base + (int64_t)rw.off - L.bytefn(0x45)), L.map);
+            if (bestBit < 0) {
+                bestBit = b;
+                bestOff = rw.off;
+                bestLayout = (int)li;
+            }
+        }
+    }
+    if (bestBit < 0) {
+        lg("ERGEBNIS: kein Layout-Treffer fuer E.");
+        return;
+    }
+    lg("VALIDIERUNG: 1 langer Piep = nochmal E schnell tippen (10 s) ...");
+    Beep(1600, 800);
+    {
+        ULONGLONG t0 = GetTickCount64();
+        int flips = 0;
+        uint8_t st = ((readImg(ctx, base, size, cur)) && ((cur[bestOff] >> bestBit) & 1)) ? 1 : 0;
+        while (GetTickCount64() - t0 < 10000) {
+            if (readImg(ctx, base, size, cur)) {
+                const uint8_t s = (uint8_t)((cur[bestOff] >> bestBit) & 1);
+                if (s != st) {
+                    ++flips;
+                    st = s;
+                }
+            }
+            Sleep(5);
+        }
+        Beep(700, 400);
+        lg("ERGEBNIS: layout=%s arrayBase=0x%llX E-Byte=+0x%zX Bit=%d | %d Wechsel in 10 s -> %s", LAYF[bestLayout].name,
+           (unsigned long long)(base + (int64_t)bestOff - LAYF[bestLayout].bytefn(0x45)), bestOff, bestBit, flips,
+           flips >= 4 ? "E GEFUNDEN + BESTAETIGT" : "noch nicht stabil - nochmal");
+    }
+}
+
 int main(int argc, char** argv) {
     std::string mode = "probe", port = "COM3", dllDir = exeDir(), module = "win32kbase.sys";
     DWORD onlyCtx = (DWORD)-1;
@@ -906,7 +1141,7 @@ int main(int argc, char** argv) {
     int phaseStep = 60;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
-        if (a == "probe" || a == "scan" || a == "scanall" || a == "env" || a == "ekey" || a == "find" || a == "phases") mode = a;
+        if (a == "probe" || a == "scan" || a == "scanall" || a == "env" || a == "ekey" || a == "find" || a == "phases" || a == "e") mode = a;
         else if (a == "--va" && i + 1 < argc) phaseVa = strtoull(argv[++i], nullptr, 0);
         else if (a == "--win" && i + 1 < argc) phaseWin = (size_t)strtoul(argv[++i], nullptr, 0);
         else if (a == "--step" && i + 1 < argc) phaseStep = atoi(argv[++i]);
@@ -981,6 +1216,8 @@ int main(int argc, char** argv) {
             scanOne(4, module.c_str());
         else
             scanOne(onlyCtx, module.c_str());
+    } else if (mode == "e") {
+        doFindE(onlyCtx == (DWORD)-1 ? 0x80000548u : onlyCtx, module.c_str(), rounds < 1 ? 3 : rounds);
     } else if (mode == "phases") {
         doPhases(onlyCtx == (DWORD)-1 ? 0x80000548u : onlyCtx, module.c_str(), phaseVa, phaseWin, phaseStep);
     } else if (mode == "find") {
