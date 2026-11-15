@@ -11,3 +11,5 @@ keyarray.txt
 dist/Ickza.ini
 dist/trigger.ini
 dist/friends.txt
+tools/*.exe
+tools/*.err

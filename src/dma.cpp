@@ -43,6 +43,9 @@ using PfnProcessGetModuleBaseU = ULONG64 (*)(VMM_HANDLE, DWORD, LPCSTR);
 
 constexpr uint64_t kPageSize = 0x1000;
 constexpr uint64_t kPageMask = ~uint64_t(0xFFF);
+// window of the blind MZ scan used to look for further win32kbase image copies
+constexpr uint64_t kWin32kScanLo = 0xFFFFF80000000000ull;
+constexpr uint64_t kWin32kScanHi = 0xFFFFF80100000000ull;
 constexpr DWORD kPidPhysical = (DWORD)-1;
 constexpr size_t kChunkPages = 48;
 constexpr size_t kChunkPagesBg = 16;
@@ -375,6 +378,7 @@ private:
 
     mutable bool keyLayout1_ = false;
     mutable int refineTries_ = 0;
+    mutable int keyFailN_ = 0;  // consecutive failed key reads -> re-verify after 3
     mutable uint64_t lastRefAddr_ = 0;
     mutable bool lastRefLayout1_ = false;
 
@@ -388,7 +392,7 @@ private:
     // find win32kbase PE copies (session copies are mapped in session space, not in any module list)
     // fast: 2-byte MZ probe over 4 GB in 64 KB steps, PE + size check only on hits
     void scanWin32kbase(DWORD ctx, std::vector<std::pair<uint64_t, uint32_t>>& out) const {
-        const uint64_t lo = 0xFFFFF80000000000ull, hi = 0xFFFFF80100000000ull;
+        const uint64_t lo = kWin32kScanLo, hi = kWin32kScanHi;
         for (uint64_t a = lo; a < hi; a += 0x10000) {
             uint16_t mz = 0;
             DWORD g = 0;
@@ -419,15 +423,27 @@ private:
     bool readImage(DWORD ctx, uint64_t base, uint32_t size, std::vector<uint8_t>& img) const {
         img.assign(size, 0);
         const DWORD fl = VMMDLL_FLAG_NOCACHE | VMMDLL_FLAG_ZEROPAD_ON_FAIL;
-        for (size_t o = 0; o < img.size(); o += 0x1000) {
-            const DWORD n = DWORD(std::min<size_t>(0x1000, img.size() - o));
+        // A 4k read costs one device round trip; win32kbase is 2-8 MB, so the old 4k loop
+        // burned thousands of round trips per image (and the refine repeats that every 5 s).
+        // Batch 64k and fall back to 4k pages only if a batched read came back short.
+        for (size_t o = 0; o < img.size(); o += 0x10000) {
+            const DWORD n = DWORD(std::min<size_t>(0x10000, img.size() - o));
             DWORD g = 0;
             readEx_(vmm_, ctx, base + o, img.data() + o, n, &g, fl);
+            if (g != n) {
+                for (size_t p = 0; p < size_t(n); p += 0x1000) {
+                    const DWORD n2 = DWORD(std::min<size_t>(0x1000, size_t(n) - p));
+                    DWORD g2 = 0;
+                    readEx_(vmm_, ctx, base + o + p, img.data() + o + p, n2, &g2, fl);
+                }
+            }
         }
         return true;
     }
 
     void refineArm() const {
+        const uint64_t armT0 = qpcUs();
+
         refBase_.clear();
         refSize_.clear();
         refA_.clear();
@@ -461,8 +477,9 @@ private:
             addRef(k);
         }
         if (gKeyLog) {
-            char s[128];
-            std::snprintf(s, sizeof s, "[trg] refine armed %zu images (of %d scan cands) - HOLD the keys", refBase_.size(), seen);
+            char s[176];
+            std::snprintf(s, sizeof s, "[trg] refine armed %zu images (of %d scan cands) in %.0f ms - HOLD the keys", refBase_.size(), seen,
+                          (qpcUs() - armT0) / 1000.0);
             gKeyLog(s);
         }
     }
@@ -589,7 +606,9 @@ private:
     // target keyboard state: win32kbase!gafAsyncKeyState (256 bytes, high bit = down)
     // ---- DMA keyboard path. Set to false to get the exact behaviour of the "all mouse buttons via box" build:
     //      no scanning, no image reads, no lag. Trigger/bind then use box + this PC only.
-    static constexpr bool keyEnable_ = false;
+    //      When on: resolve once (result is kept in keyarray.txt), verification runs at most 6x5s,
+    //      then the path is passive (one 64 byte read per caller tick) - see docs/INPUT_RESEARCH.md.
+    static constexpr bool keyEnable_ = true;
 
     bool keyState(uint8_t out[256]) const override {
         if (!keyEnable_) {
@@ -603,9 +622,15 @@ private:
         if (!keyState_) return false;
         uint8_t raw[64] = {};
         if (!readAt(keyCtxPid_, keyState_, raw, sizeof raw)) {
-            if (gKeyLog) gKeyLog("[trg] keydiag read FAILED");
+            if (++keyFailN_ == 1 && gKeyLog) gKeyLog("[trg] keydiag read FAILED");
+            if (keyFailN_ >= 3 && keyPhase_ == 5) {  // verified state gone (reboot / session moved) -> look again
+                keyFailN_ = 0;
+                keyPhase_ = 1;
+                if (gKeyLog) gKeyLog("[trg] keydiag read failed 3x - re-verifying the key array");
+            }
             return false;
         }
+        keyFailN_ = 0;
         decodeKeyBitmap(raw, out, keyLayout1_);
         diagKey(out, raw);
         if (keyPhase_ == 1 || keyPhase_ == 4) findKey();  // armed: the compare pass runs automatically 5s after arming
@@ -722,6 +747,19 @@ private:
         // then re-base that rva for every plausible session ctx. The 7-key scan decides which one is live.
         uint64_t rva = 0;
         keyRva_ = 0;
+        // image size of win32kbase: the refine stage needs it to arm module/pdb candidates.
+        // Measured 2026-11-15 on the Win11 26100 target: module bases resolve in every ctx
+        // (0xFFFFF8073E9D0000, cbImageSize 0x345000) but the blind session scan window does
+        // not contain them, so "scan/session" candidates with a size never appear -> refine
+        // had nothing to arm (0 images) and could never confirm an exact offset.
+        uint32_t szKb = 0;
+        if (moduleFromName_) {
+            PVMMDLL_MAP_MODULEENTRY me = nullptr;
+            if (moduleFromName_(vmm_, 4, "win32kbase.sys", &me, VMMDLL_MODULE_FLAG_NORMAL) && me) {
+                szKb = me->cbImageSize;
+                memFree_(me);
+            }
+        }
         const bool savedOk = loadSavedKeyArray();
         if (savedOk) keyCands2_.push_back({keyCtxPid_, keyState_, "saved"});
         if (procModBase_ && pdbLoad_ && pdbSymAddr_) {
@@ -751,8 +789,9 @@ private:
                         std::snprintf(s, sizeof s, "[trg] keyresolve base(ctx 0x%lX)=0x%llX", (unsigned long)c, (unsigned long long)base);
                         gKeyLog(s);
                     }
-                    if (base) keyCands2_.push_back({c, base + rva, "pdb/win32kbase"});
-                    if (c == (wp | 0x80000000u) || c == 4u) {
+                    if (base) keyCands2_.push_back({c, base + rva, "pdb/win32kbase", szKb});
+                    const bool inWin = baseK >= kWin32kScanLo && baseK < kWin32kScanHi;
+                    if ((c == (wp | 0x80000000u) || c == 4u) && inWin) {
                         std::vector<std::pair<uint64_t, uint32_t>> bases;
                         scanWin32kbase(c, bases);
                         for (const auto& b : bases) keyCands2_.push_back({c, b.first + rva, "scan/session", b.second});
@@ -761,6 +800,13 @@ private:
                             std::snprintf(s, sizeof s, "[trg] keyresolve scan(ctx 0x%lX)=%zu images", (unsigned long)c, bases.size());
                             gKeyLog(s);
                         }
+                    } else if (c == (wp | 0x80000000u) && gKeyLog) {
+                        // measured 2026-11-15 (Win11 26100): module base 0xFFFFF807... lies outside the
+                        // window, so the blind scan cost ~65k reads and could not find the image at all.
+                        char s[176];
+                        std::snprintf(s, sizeof s, "[trg] keyresolve blind scan skipped (baseK=0x%llX outside 0x%llX-0x%llX)",
+                                      (unsigned long long)baseK, (unsigned long long)kWin32kScanLo, (unsigned long long)kWin32kScanHi);
+                        gKeyLog(s);
                     }
                 }
                 // win32ksgd.sys bases (session-slot chain) for the csrss pids + module dump
@@ -817,7 +863,7 @@ private:
                     const uint64_t b = procModBase_(vmm_, c, "win32kbase.sys");
                     if (!b) continue;
                     if (rva) {
-                        keyCands2_.push_back({c, b + rva, "mod/win32kbase"});
+                        keyCands2_.push_back({c, b + rva, "mod/win32kbase", szKb});
                         ++modCands;
                     }
                     if (getEatU_) {
@@ -889,6 +935,7 @@ private:
 
     mutable uint64_t keyWBase_ = 0;
     mutable uint32_t keyWSize_ = 0;
+    // 0 idle, 1 armed 7-key scan, 4 differential refine (max 6 tries), 5 verified -> no periodic work
     mutable int keyPhase_ = 0;
     mutable ULONGLONG keyPhaseAt_ = 0;
     mutable std::vector<uint8_t> keyA_, keyB_;
@@ -914,11 +961,31 @@ private:
         static const uint8_t vks[] = {0x10, 0x20, 0x41, 0x44, 0x45, 0x53, 0x57};
         if (keyPhase_ == 4) {
             if (now - keyPhaseAt_ < 5000) return;
-            refineCompare();
             keyPhaseAt_ = now;
+            const uint64_t t0 = qpcUs();
+            if (refineCompare()) {  // confirmed -> no frame time spent on refining any more
+                keyPhase_ = 5;
+                if (gKeyLog) {
+                    char s[128];
+                    std::snprintf(s, sizeof s, "[trg] refine confirmed in %.0f ms - periodic refine stopped", (qpcUs() - t0) / 1000.0);
+                    gKeyLog(s);
+                }
+                return;
+            }
+            if (++refineTries_ >= 6) {  // bounded: keep the tentative candidate, stop the work
+                keyPhase_ = 5;
+                if (gKeyLog) {
+                    char s[128];
+                    std::snprintf(s, sizeof s, "[trg] refine gave up after %d tries (%.0f ms) - tentative candidate kept", refineTries_,
+                                  (qpcUs() - t0) / 1000.0);
+                    gKeyLog(s);
+                }
+                return;
+            }
             refineArm();
             return;
         }
+        if (keyPhase_ == 5) return;
         if (keyPhase_ != 1) {
             // (re)arm: snapshot the idle state of every candidate
             keySnapA_.assign(keyCands2_.size() * 64, 0);
@@ -992,6 +1059,7 @@ private:
             std::snprintf(s, sizeof s, "[trg] keyscan no hit (new=%d down=%d) - re-arm, keep pressing", bestNew, bestDown);
             gKeyLog(s);
         }
+        refineTries_ = 0;
         keyPhase_ = 4;      // next: differential search inside the session image
         keyPhaseAt_ = now;
         refineArm();

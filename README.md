@@ -55,7 +55,7 @@ Keys: `F8` radar on/off · `Tab` collapse/expand settings sidebar · `MMB` on a 
 | `Ickza.ini` | ESP/radar settings, range, minimap size, sidebar state |
 | `trigger.ini` | kmbox/MAKCU device, baud, commands, trigger key, delay, hitbox mask |
 | `friends.txt` | friend list (names, case-insensitive) |
-| `keyarray.txt` | only used when the DMA keyboard path is enabled (see below) |
+| `keyarray.txt` | found DMA key address (written once the key path verified it) |
 
 ## Offsets
 
@@ -68,12 +68,21 @@ DayZ updates move a few globals; currently patched for the latest build:
 
 If it says "waiting for DayZ" after a game update, these are the two values to find again.
 
-## DMA keyboard path (optional, currently OFF)
+## DMA keyboard path
 
-A trigger key pressed on the **game PC** can also be read over DMA (`win32k` `gafAsyncKeyState`).
-The address lives in session space and has to be searched, which caused hitching, so it is switched off on purpose:
-`src/dma.cpp` -> `static constexpr bool keyEnable_ = false;`. With it off, trigger/bind use the box and this PC only.
-Turning it on re-enables the scan/refine code (`resolveKey` / `findKey` / `refineCompare`).
+A trigger key pressed on the **game PC** can also be read over DMA (`win32k` `gafAsyncKeyState`), so the
+trigger works even when the keyboard is not routed through the box. The address lives in session space and
+has to be searched, which used to cause hitching - the path is therefore bounded now:
+
+* resolve runs **once**, the found address is kept in `keyarray.txt` (delete that file to force a fresh search)
+* verification (7 test keys, then a differential refine inside the win32k image) runs at most 6 attempts and
+  then stops - no periodic full-image reads any more (`refine confirmed ... periodic refine stopped`)
+* afterwards the path is passive: one 64 byte read per tick
+* if the read fails 3x (reboot / session moved) it re-verifies by itself
+
+Off-switch (exactly the old behaviour: box + this PC only): `src/dma.cpp` -> `static constexpr bool keyEnable_ = false;`
+Details, evidence and measurements: `docs/INPUT_RESEARCH.md`, `docs/INPUT_DEBUG_HISTORY.md`.
+Standalone hardware check without the cheat: `tools\keyprobe.exe probe` (DMA card must be free).
 
 ## Credits
 
