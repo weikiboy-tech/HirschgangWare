@@ -1,0 +1,15 @@
+keyprobe mode=e port=COM3 dll=C:\Users\Admin\Documents\Ickza-DMA\build\dma module=win32kfull.sys
+[ok] loaded C:\Users\Admin\Documents\Ickza-DMA\build\dma\vmm.dll
+[ok] VMM initialized
+[box] reply: km.MAKCU>>> 
+processes: 336
+=== E-TEST (read-only, Box unberuehrt) ctx=0x80000548 win32kfull.sys, 3 Runden ===
+=== ABLAUF: 8x COUNTDOWN -> je Runde: HOHER Piep = E am GAMING-PC HALTEN (Box klickt automatisch mit), TIEFER Piep = E LOSLASSEN
+Runde 1/3: 0 Bytes reagierten beim HALTEN (0 Messpunkte, 0 = E nicht gedrueckt)
+Runde 2/3: 0 Bytes reagierten beim HALTEN (0 Messpunkte, 0 = E nicht gedrueckt)
+Runde 3/3: 0 Bytes reagierten beim HALTEN (0 Messpunkte, 0 = E nicht gedrueckt)
+Bytes, die waehrend HALTEN reagiert haben: 0 (Top 16):
+  -> keine Reaktion beim Halten: wurde E wirklich am GAMING-PC gedrueckt?
+INPUT-ANKUNFT am Ziel (bekanntes Reaktionsfeld +0x2AE2D0): 0/3 Runden   <-- deine Tasten kamen NICHT am Ziel an (Tastatur am FALSCHEN PC?)
+ERGEBNIS: E NICHT gefunden - Pieps verpasst? nochmal laufen lassen.
+done.

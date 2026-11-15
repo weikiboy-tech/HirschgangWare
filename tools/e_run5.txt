@@ -1,0 +1,15 @@
+keyprobe mode=e port=COM3 dll=C:\Users\Admin\Documents\Ickza-DMA\build\dma module=win32kbase.sys
+[ok] loaded C:\Users\Admin\Documents\Ickza-DMA\build\dma\vmm.dll
+[ok] VMM initialized
+[box] reply: km.MAKCU>>> 
+processes: 337
+=== E-TEST (read-only, Box unberuehrt) ctx=0x80000548 win32kbase.sys, 3 Runden ===
+=== ABLAUF: 8x kurzer COUNTDOWN -> dann je Runde: HOHER Piep = E druecken und HALTEN, TIEFER Piep = E LOSLASSEN
+Runde 1/3: 1 Bytes reagierten beim HALTEN (10 Messpunkte, 0 = E nicht gedrueckt)
+Runde 2/3: 1 Bytes reagierten beim HALTEN (23 Messpunkte, 0 = E nicht gedrueckt)
+Runde 3/3: 1 Bytes reagierten beim HALTEN (19 Messpunkte, 0 = E nicht gedrueckt)
+Bytes, die waehrend HALTEN reagiert haben: 1 (Top 16):
+  +0x2AEAE9  halten=3/3 loslassen=0/3  idle=09 gehalten=0C diff=05
+INPUT-ANKUNFT am Ziel (bekanntes Reaktionsfeld +0x2AE2D0): 0/3 Runden   <-- deine Tasten kamen NICHT am Ziel an (Tastatur am FALSCHEN PC?)
+ERGEBNIS: E NICHT gefunden - Pieps verpasst? nochmal laufen lassen.
+done.
