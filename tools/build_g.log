@@ -1,0 +1,33 @@
+Der Befehl "vswhere.exe" ist entweder falsch geschrieben oder
+konnte nicht gefunden werden.
+esp.cpp
+src\esp.cpp(2407): warning C4456: Deklaration von "c" blendet vorherige lokale Deklaration aus
+src\esp.cpp(2387): note: Siehe Deklaration von "c"
+gpu_canvas.cpp
+radar.cpp
+mapdl.cpp
+loot.cpp
+friends.cpp
+trigger.cpp
+src\trigger.cpp(329): warning C4310: Typumwandlung verkÅrzt konstante Werte
+src\trigger.cpp(548): warning C4996: 'inet_addr': Use inet_pton() or InetPton() instead or define _WINSOCK_DEPRECATED_NO_WARNINGS to disable deprecated API warnings
+imgui.cpp
+imgui_draw.cpp
+imgui_tables.cpp
+imgui_widgets.cpp
+imgui_impl_win32.cpp
+imgui_impl_dx11.cpp
+esp_launcher.cpp
+esp_panel.cpp
+ui.cpp
+process.cpp
+dma.cpp
+src\dma.cpp(582): warning C4996: 'fscanf': This function or variable may be unsafe. Consider using fscanf_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
+image.cpp
+rtti.cpp
+Code wird generiert...
+Kompilieren...
+discover.cpp
+telemetry.cpp
+speedtest.cpp
+Code wird generiert...
