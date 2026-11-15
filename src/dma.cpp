@@ -420,6 +420,7 @@ private:
     mutable std::vector<std::pair<DWORD, uint64_t>> refBase_;
     mutable std::vector<uint32_t> refSize_;
     mutable std::vector<std::vector<uint8_t>> refA_;
+    mutable std::vector<std::vector<uint32_t>> refUn_;  // prefix sum of idle-unstable bytes (counters)
 
     bool readImage(DWORD ctx, uint64_t base, uint32_t size, std::vector<uint8_t>& img) const {
         img.assign(size, 0);
@@ -448,21 +449,32 @@ private:
         refBase_.clear();
         refSize_.clear();
         refA_.clear();
+        refUn_.clear();
         int seen = 0;
         auto addRef = [&](const KeyCand& k) {
             const uint64_t base = k.addr - keyRva_;
-            std::vector<uint8_t> img;
+            std::vector<uint8_t> img, img2;
             readImage(k.pid, base, k.size, img);
+            readImage(k.pid, base, k.size, img2);  // 2nd idle read: counters/timers are unstable, a bitmap is not
+            std::vector<uint32_t> un(img.size() + 1, 0);
+            size_t nUn = 0;
+            for (size_t i = 0; i < img.size(); ++i) {
+                const bool dif = img[i] != img2[i];
+                if (dif) ++nUn;
+                un[i + 1] = un[i] + (dif ? 1u : 0u);
+            }
             int nz = 0;
-            for (size_t i = 0; i < img.size(); i += 0x100) nz += img[i] != 0;
+            for (size_t i = 0; i < img2.size(); i += 0x100) nz += img2[i] != 0;
             if (gKeyLog) {
-                char s[176];
-                std::snprintf(s, sizeof s, "[trg] refine base=0x%llX size=0x%X nz=%d", (unsigned long long)base, k.size, nz);
+                char s[200];
+                std::snprintf(s, sizeof s, "[trg] refine base=0x%llX size=0x%X nz=%d unstable=%zu (idle gate)", (unsigned long long)base, k.size, nz,
+                              nUn);
                 gKeyLog(s);
             }
             refBase_.push_back({k.pid, base});
             refSize_.push_back(k.size);
-            refA_.push_back(std::move(img));
+            refA_.push_back(std::move(img2));
+            refUn_.push_back(std::move(un));
         };
         const uint64_t pref = keyState_;
         for (const auto& k : keyCands2_)  // preferred: image of the tentative candidate
@@ -505,7 +517,9 @@ private:
             const size_t wend = n < 22 ? n : 22;
             for (size_t i = 0; i < wend; ++i) win += df[i];
             for (size_t off = 0; off + 64 <= n; ++off) {
-                if (win >= 1) {
+                // idle-stability gate: a window containing counter/timer bytes is not the key bitmap
+                const bool gate = ii >= refUn_.size() || refUn_[ii][off + 64] == refUn_[ii][off];
+                if (gate && win >= 1) {
                     // model: at sample A (idle) the 7 bits are 0, at sample B (pressed) they are 1
                     int heldB = 0, rise = 0;
                     for (const uint8_t k : vks) {
@@ -1006,8 +1020,17 @@ private:
         size_t best = SIZE_MAX;
         bool bestLayout1 = false;
         for (size_t i = 0; i < keyCands2_.size(); ++i) {
-            uint8_t raw[64] = {};
+            uint8_t raw[64] = {}, raw2[64] = {};
             if (!readAt(keyCands2_[i].pid, keyCands2_[i].addr, raw, 64)) continue;
+            // idle-stability gate: a counter/timer byte changes within ~2 ms, a key bitmap does not
+            if (!readAt(keyCands2_[i].pid, keyCands2_[i].addr, raw2, 64) || std::memcmp(raw, raw2, 64) != 0) {
+                if (gKeyLog) {
+                    char s[176];
+                    std::snprintf(s, sizeof s, "[trg] keyscan %s skipped: window not idle-stable (counter/timer)", keyCands2_[i].how);
+                    gKeyLog(s);
+                }
+                continue;
+            }
             // score both layouts, keep the better one
             int downN = 0, newN = 0, downN1 = 0, newN1 = 0;
             for (const uint8_t k : vks) {

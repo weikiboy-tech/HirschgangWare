@@ -212,7 +212,10 @@ pdb window (base+rva, 192 bytes): 0 bytes react to the pulses
 
 **Unterscheidung = `keyprobe.exe ekey`** (existiert, rein lesend, Box unberührt): Pieps-Führung, E und W am Gaming-PC halten/loslassen, 3 Runden. Findet es saubere, stabile Bits auf der Modell-Distanz → (A) widerlegt, Region gefunden. Findet es **nichts** → (B) gilt, und die Suche muss auf andere Module/Contexts/Session-Fenster ausgeweitet werden.
 
-### 5.9 Merksätze (Anti-Loop, verschärft)
+**P1 aus §5.8 ist damit umgesetzt (Idle-Stabilitäts-Gate):**
+
+| P1 | Beweis A/B/C (Zähler-Zeitstempel als „Bitmap" fehlinterpretiert) | `dma.cpp`: **Idle-Stabilitäts-Gate** — `refineArm` liest zweimal im Idle und legt eine Prefix-Summe instabiler Bytes an; `refineCompare` überspringt Fenster mit instabilen Bytes; der 7-Tasten-Scan verwirft Kandidaten, deren Fenster zwischen zwei Reads nicht identisch ist | Zähler/Zeitfelder können nicht mehr als Bitmap durchgehen; nur echte, ruhige Bitmap-Fenster werden geprüft | Build grün / Hardware-Test offen | `tools\build_g.log` | – | Gate an 3 Stellen entfernen |
+
 
 * Eine Speicheränderung ist **kein** Tastendruck. „ready"/„confirmed" ist **kein** Beweis.
 * Ohne Idle-Stabilität + Exklusivität ist jede Offset-Suche in einem 3-MB-Bild ein Münzwurf.
