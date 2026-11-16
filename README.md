@@ -44,7 +44,7 @@ Output: `build\HirschgangWare.exe` (plus `build\dma`, `build\maps`, loot tables)
 dist\HirschgangWare.exe --dma --fullscreen
 ```
 
-`run_hirschgangware.bat` does the same. **Only one DMA tool may own the card at a time** (close PureDMA / pcileech / SSZ).
+`run_hirschgangware.bat` opens the launcher. Click **Start** to attach and open the radar. Command-line flags preselect the launcher settings. **Only one DMA tool may own the card at a time** (close PureDMA / pcileech / SSZ).
 
 Keys: `F8` radar on/off · `Tab` collapse/expand settings sidebar · `MMB` on a radar player = mark/unmark friend · `END` exit.
 
@@ -85,6 +85,12 @@ very brief taps. On loss of the DMA read the held state clears. Inputs held
 during a reconnect must be released before they can activate again.
 
 [Address diagnosis and hardware measurements](docs/INPUT_MAMBO_COMPARISON.md)
+
+## Optional browser Webmap
+
+Start with `HirschgangWare.exe --webmap` and open http://127.0.0.1:8765/.
+For the live-data releases, map installation, tests and protected remote
+access, see [Webmap setup](docs/WEBMAP.md).
 
 ## Credits
 

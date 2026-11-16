@@ -1,0 +1,14 @@
+tunnel: REPLACE-WITH-TUNNEL-UUID
+credentials-file: C:\Users\YOUR_USER\.cloudflared\REPLACE-WITH-TUNNEL-UUID.json
+
+ingress:
+  - hostname: webmap.example.com
+    service: http://127.0.0.1:8765
+    originRequest:
+      httpHostHeader: webmap.example.com
+      access:
+        required: true
+        teamName: YOUR-ZERO-TRUST-TEAM
+        audTag:
+          - REPLACE-WITH-THE-ACCESS-APPLICATION-AUD
+  - service: http_status:404

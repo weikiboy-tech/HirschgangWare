@@ -41,6 +41,7 @@
     <ClCompile Include="src\esp.cpp" />
     <ClCompile Include="src\gpu_canvas.cpp" />
     <ClCompile Include="src\radar.cpp" />
+    <ClCompile Include="src\webmap.cpp" />
     <ClCompile Include="src\mapdl.cpp" />
     <ClCompile Include="src\loot.cpp" />
     <ClCompile Include="src\trigger.cpp" />
@@ -72,6 +73,8 @@
     <ClInclude Include="src\keyboard_bitmap.h" />
     <ClInclude Include="src\keyboard_resolver.h" />
     <ClInclude Include="src\radar.h" />
+    <ClInclude Include="src\webmap.h" />
+    <ClInclude Include="src\webmap_state.h" />
     <ClInclude Include="src\rtti.h" />
     <ClInclude Include="src\speedtest.h" />
     <ClInclude Include="src\telemetry.h" />

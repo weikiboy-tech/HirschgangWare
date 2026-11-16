@@ -1741,6 +1741,40 @@ void drawSettingsBody(Config& cfg, const Counts& n, bool live, const std::vector
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("type to search; maps with an arrow are downloaded when picked (a few seconds, from dayz.xam.nu)");
     ImGui::PopItemWidth();
 
+    if (ImGui::CollapsingHeader("Webmap")) {
+        bool changed = switchRow("Enable Webmap (localhost)", &cfg.webmap.enabled);
+        ImGui::SetNextItemWidth(112.f);
+        changed |= ImGui::InputInt("Local port", &cfg.webmap.port, 0, 0);
+        cfg.webmap.port = std::clamp(cfg.webmap.port, 1024, 65535);
+        changed |= ImGui::SliderInt("Updates per second", &cfg.webmap.hz, 1, 20);
+        ImGui::TextDisabled("%s", webmap::status().c_str());
+        ImGui::BeginDisabled(!cfg.webmap.enabled);
+        if (ImGui::Button("Open Webmap")) cfg.openWebmap = true;
+        ImGui::EndDisabled();
+        struct Share { const char* label; webmap::Release bit; };
+        constexpr Share shares[]{
+            {"Publish current map", webmap::CurrentMap}, {"Own position", webmap::Own},
+            {"Own heading", webmap::Heading}, {"Player positions", webmap::Players},
+            {"Infected", webmap::Infected}, {"Animals", webmap::Animals},
+            {"Vehicles", webmap::Vehicles}, {"Loot (local filters apply)", webmap::Loot},
+        };
+        ImGui::TextUnformatted("Server-side releases");
+        for (const auto& share : shares) {
+            ImGui::PushID(int(share.bit));
+            ImGui::BeginDisabled((share.bit != webmap::CurrentMap && !cfg.webmap.shares(webmap::CurrentMap)) ||
+                                 (share.bit == webmap::Heading && !cfg.webmap.shares(webmap::Own)));
+            bool on = cfg.webmap.shares(share.bit);
+            if (switchRow(share.label, &on)) {
+                if (on) cfg.webmap.release |= share.bit;
+                else cfg.webmap.release &= ~unsigned(share.bit);
+                changed = true;
+            }
+            ImGui::EndDisabled();
+            ImGui::PopID();
+        }
+        cfg.webmapChanged |= changed;
+    }
+
     ch |= switchRow("Follow the game's map", &cfg.mapAuto);
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("switch the radar to the map the game loads (downloading it if needed).\n"

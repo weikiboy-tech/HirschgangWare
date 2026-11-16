@@ -40,10 +40,14 @@
   </ItemDefinitionGroup>
   <Target Name="CopyRuntime" AfterTargets="Build">
     <ItemGroup>
+      <WebFiles Include="$(SolutionDir)web\*" />
+      <MapFiles Include="$(SolutionDir)dist\maps\*" />
       <DmaFiles Include="$(SolutionDir)dma\*" />
       <LaunchFiles Include="$(SolutionDir)laptop\*.bat" />
       <LootFiles Include="$(SolutionDir)laptop\dayz_*.txt" />
     </ItemGroup>
+    <Copy SourceFiles="@(WebFiles)" DestinationFolder="$(OutDir)web" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(MapFiles)" DestinationFolder="$(OutDir)maps" Condition="!Exists('$(OutDir)maps\%(MapFiles.Filename)%(MapFiles.Extension)')" />
     <Copy SourceFiles="@(DmaFiles)" DestinationFolder="$(OutDir)dma" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(LaunchFiles)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(LootFiles)" DestinationFolder="$(OutDir)" Condition="!Exists('$(OutDir)%(LootFiles.Filename)%(LootFiles.Extension)')" />

@@ -190,6 +190,11 @@ void loadSettings(EspSettings& s) {
     s.names = readBool("names", s.names);
     s.info = readBool("info", s.info);
     s.crosshair = readBool("crosshair", s.crosshair);
+    s.webmap.enabled = readBool("webmap_enabled", s.webmap.enabled);
+    s.webmap.port = std::clamp(int(GetPrivateProfileIntA(readSection(), "webmap_port", s.webmap.port, readIniPath().c_str())), 1024, 65535);
+    s.webmap.hz = std::clamp(int(GetPrivateProfileIntA(readSection(), "webmap_hz", s.webmap.hz, readIniPath().c_str())), 1, 20);
+    s.webmap.release = GetPrivateProfileIntA(readSection(), "webmap_release", 0, readIniPath().c_str()) & 255u;
+    s.webmap.publicHost = readString("webmap_public_host", "");
     s.crosshairSize = GetPrivateProfileIntA(readSection(), "crosshair_size", s.crosshairSize, readIniPath().c_str());
 }
 
@@ -241,6 +246,11 @@ void saveSettings(const EspSettings& s) {
     writeBool("box", s.box);
     writeBool("names", s.names);
     writeBool("info", s.info);
+    writeBool("webmap_enabled", s.webmap.enabled);
+    writeString("webmap_port", std::to_string(s.webmap.port));
+    writeString("webmap_hz", std::to_string(s.webmap.hz));
+    writeString("webmap_release", std::to_string(s.webmap.release));
+    writeString("webmap_public_host", s.webmap.publicHost);
     writeBool("crosshair", s.crosshair);
     writeString("crosshair_size", std::to_string(s.crosshairSize));
 }

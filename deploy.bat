@@ -18,5 +18,9 @@ copy /y laptop\run_hirschgangware.bat "%DEST%\" >nul
 if not exist "%DEST%\dayz_rare.txt" copy /y laptop\dayz_rare.txt "%DEST%\" >nul
 if not exist "%DEST%\dayz_loot_cats.txt" copy /y laptop\dayz_loot_cats.txt "%DEST%\" >nul
 if exist build\dma\ robocopy build\dma "%DEST%\dma" /e /xo /njh /njs /ndl /nfl >nul
+robocopy web "%DEST%\web" /e /xo /njh /njs /ndl /nfl >nul
+if errorlevel 8 exit /b 1
+robocopy dist\maps "%DEST%\maps" /e /xo /njh /njs /ndl /nfl >nul
+if errorlevel 8 exit /b 1
 echo deployed to %DEST%
 exit /b 0

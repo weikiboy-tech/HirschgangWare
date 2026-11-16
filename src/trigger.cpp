@@ -886,6 +886,7 @@ void clickOnce() {
     ++gLive.clicks;
 }
 void disconnectDevice() {
+    if (gDownAt && connected()) deviceSend(gCfg.cmdUp);
     closeDevice();
     setStatus("disconnected");
     gLive.note.clear();

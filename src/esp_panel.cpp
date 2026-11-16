@@ -244,6 +244,7 @@ std::string displayLabel() {
 
 
 void setupPage(Graphics& g, bool run) {
+    const bool stopping = p.hooks.stopping && p.hooks.stopping();
     label(g, "DISPLAY", CX, 96);
     const RectF dc(CX, 114, CW, 52);
     card(g, dc, 0, th::border);
@@ -268,7 +269,7 @@ void setupPage(Graphics& g, bool run) {
     const Color c1 = lerp(lerp(th::a1, th::red, rk), th::white, h * 0.1f), c2 = lerp(lerp(th::a2, th::red2, rk), th::white, h * 0.1f);
     fillGrad(g, sb, lerp(c1, th::bgLow, press * 0.25f), lerp(c2, th::bgLow, press * 0.25f), 12);
     {
-        const std::string s = run ? "Stop" : "Start";
+        const std::string s = stopping ? "Cancelling..." : run ? "Stop" : "Start";
         const float tw = textW(g, s, *fonts.semi), cx = sb.X + sb.Width / 2, cy = sb.Y + sb.Height / 2;
         text(g, s, *fonts.semi, RectF(cx - tw / 2 + 10, sb.Y, tw + 4, sb.Height), th::white, StringAlignmentNear);
         SolidBrush w(th::white);
@@ -279,7 +280,7 @@ void setupPage(Graphics& g, bool run) {
             const PointF tri[3] = {PointF(ix - 4, cy - 6), PointF(ix - 4, cy + 6), PointF(ix + 6, cy)};
             g.FillPolygon(&w, tri, 3);
         }
-        p.hits.push_back({BtnStart, sb});
+        if (!stopping) p.hits.push_back({BtnStart, sb});
     }
 
     const PanelInfo in = run && p.hooks.info ? p.hooks.info() : PanelInfo{};
@@ -415,9 +416,9 @@ void activate(int id) {
             break;
         case BtnIdentify: identifyDisplays(p.displays); break;
         case BtnStart:
+            if (p.hooks.stopping && p.hooks.stopping()) break;
             if (run) p.hooks.stop();
             else {
-                p.s->dma = true;
                 p.s->dzRadarScreen = true;
                 p.hooks.start();
             }

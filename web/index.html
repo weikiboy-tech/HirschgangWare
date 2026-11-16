@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <title>HirschgangWare Webmap</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div id="layout">
+    <aside id="sidebar" aria-label="Karteneinstellungen">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">⌖</span><div><strong>HirschgangWare</strong><small>Webmap</small></div>
+        <button id="close-sidebar" class="icon" type="button" aria-label="Sidebar einklappen" title="Sidebar einklappen">‹</button></div>
+      <section>
+        <h2>Karte</h2>
+        <label class="field" for="map-select">Karte auswählen</label>
+        <select id="map-select"></select>
+        <label class="toggle"><span>Aktuelle Spielkarte</span><input id="auto-map" type="checkbox"></label>
+        <div class="actions">
+          <button id="zoom-out" type="button" title="Verkleinern" aria-label="Verkleinern">−</button>
+          <button id="zoom-in" type="button" title="Vergrößern" aria-label="Vergrößern">+</button>
+          <button id="center" type="button" title="Eigene Position verfolgen" aria-label="Eigene Position verfolgen">⌖</button>
+          <button id="fullscreen" type="button" title="Vollbild" aria-label="Vollbild">⛶</button>
+        </div>
+      </section>
+      <section>
+        <h2>Tracking</h2>
+        <label class="toggle"><span>Auto-Follow</span><input id="follow" type="checkbox"></label>
+        <label class="toggle"><span>Auto-Rotation</span><input id="rotate" type="checkbox"></label>
+        <p id="orientation" class="hint">North-Up</p>
+        <label class="toggle"><span>Weiche Übergänge</span><input id="smooth" type="checkbox"></label>
+        <label class="field" for="duration">Reaktionszeit <output id="duration-value"></output></label>
+        <input id="duration" type="range" min="40" max="600" step="10">
+        <p id="tracking-status" class="hint"></p>
+      </section>
+      <section>
+        <h2>Ebenen</h2>
+        <label class="toggle"><span>Ortsnamen</span><input id="places" type="checkbox"></label>
+        <label class="toggle"><span>Beschriftungen</span><input id="labels" type="checkbox"></label>
+        <label class="toggle"><span>Koordinatengitter</span><input id="grid" type="checkbox"></label>
+        <label class="toggle"><span>Wegpunkte</span><input id="waypoints" type="checkbox"></label>
+        <label class="field" for="marker-size">Markergröße</label>
+        <input id="marker-size" type="range" min="3" max="16" step="1">
+        <div id="released"></div>
+      </section>
+      <section>
+        <h2>Orte &amp; Wegpunkte</h2>
+        <input id="place-search" type="search" placeholder="Ortsnamen suchen" aria-label="Ortsnamen suchen" maxlength="80" autocomplete="off">
+        <ul id="results" class="items"></ul>
+        <button id="add-waypoint" type="button" aria-pressed="false">+ Wegpunkt setzen</button>
+        <ul id="waypoint-list" class="items"></ul>
+      </section>
+      <section class="connection">
+        <h2>Verbindung</h2>
+        <dl><dt>Status</dt><dd id="connection">Verbindet</dd>
+          <dt>Letztes Update</dt><dd id="updated">–</dd>
+          <dt>Karten-ID</dt><dd id="map-id">–</dd></dl>
+        <p id="connection-error" class="error" role="status"></p>
+      </section>
+    </aside>
+    <main id="stage" aria-label="Kartenansicht">
+      <canvas id="canvas" aria-label="Interaktive Weltkarte" tabindex="0"></canvas>
+      <header class="map-toolbar">
+        <button id="open-sidebar" type="button" aria-label="Karteneinstellungen öffnen" aria-controls="sidebar">☰</button>
+        <button id="refresh" type="button" title="Kartenliste aktualisieren" aria-label="Kartenliste aktualisieren">↻</button>
+        <span class="pill" id="map-title">Karten</span>
+        <span class="pill" id="badge" role="status">Verbindet</span>
+      </header>
+      <p id="map-message" role="status"></p>
+      <footer class="map-footer"><span id="coords" class="pill">X – · Z –</span></footer>
+    </main>
+  </div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

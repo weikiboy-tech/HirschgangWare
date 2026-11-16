@@ -40,6 +40,9 @@
 #include "trigger.h"
 #include "process.h"
 #include "radar.h"
+#include "webmap.h"
+#include <shellapi.h>
+#pragma comment(lib, "shell32.lib")
 #include "rtti.h"
 #include "speedtest.h"
 #include "telemetry.h"
@@ -120,7 +123,6 @@ bool gDma = false;
 bool gFull = false;
 bool gForceGdi = false;
 bool gWantSweep = false;
-ULONGLONG gAutoResumeAt = 0;
 std::unique_ptr<GpuRenderer> gGpu;
 int gGpuFails = 0;
 HWND gOverlay = nullptr, gGame = nullptr;
@@ -180,6 +182,7 @@ struct DzLootItem {
     int cat = LC_Other;
 };
 struct DzSnap {
+    std::string mapId;
     uint64_t cam = 0;
     uint64_t tUs = 0;
     bool haveMe = false;
@@ -860,14 +863,18 @@ void dzMapDownloadNow(const std::string& id) {
 std::mutex gDzMapMx;
 std::string gDzMapDetected;
 std::string gDzMapSeen;
+uint64_t gDzMapSeenWorld = 0;
 std::atomic<bool> gDzMapRedetect{false};
 
 void dzDetectMap(uint64_t world) {
     if (!gProc || !world) return;
     static ULONGLONG tick = 0;
     static std::string last;
+    static uint64_t previousWorld = 0;
     const ULONGLONG now = GetTickCount64();
-    if (gDzMapRedetect.exchange(false)) {
+    const bool redetect = gDzMapRedetect.exchange(false);
+    if (redetect || world != previousWorld) {
+        previousWorld = world;
         last.clear();
         tick = 0;
     }
@@ -897,6 +904,7 @@ void dzDetectMap(uint64_t world) {
 #endif
     std::lock_guard<std::mutex> lk(gDzMapMx);
     gDzMapSeen = id;
+    gDzMapSeenWorld = world;
     if (id != last) {
         last = id;
         gDzMapDetected = id;
@@ -1048,6 +1056,10 @@ void scanDayz(DzSnap& out, const char*& stage) {
         gDzWorldTick = now;
     }
     dzDetectMap(world);
+    {
+        std::lock_guard<std::mutex> lock(gDzMapMx);
+        if (gDzMapSeenWorld == world) out.mapId = gDzMapSeen;
+    }
     std::vector<Process::ReadReq> reqs;
 
     uint64_t cam = 0, link = 0;
@@ -2363,10 +2375,67 @@ void stopDzThread() {
     if (gDzLootThread.joinable()) gDzLootThread.join();
 }
 
+void publishWebmap(const DzSnap& snap, const dz::Cam& view) {
+    const auto& options = gSettings.webmap;
+    if (!options.enabled || !options.shares(webmap::CurrentMap)) return;
+    static uint64_t last = 0;
+    const uint64_t now = GetTickCount64();
+    if (now - last < uint64_t(1000 / options.hz)) return;
+    last = now;
+    if (!snap.tUs || qpcUs() - snap.tUs > 1500000) {
+        webmap::clear();
+        return;
+    }
+
+    const auto& id = snap.mapId;
+    if (id.empty()) {
+        webmap::clear();
+        return;
+    }
+    radar::Frame frame;
+    frame.mapSize = dzMapSize(id);
+    frame.ok = options.shares(webmap::Own) && snap.haveMe;
+    if (frame.ok) {
+        frame.meX = snap.me.x;
+        frame.meZ = snap.me.z;
+        if (options.shares(webmap::Heading)) {
+            frame.fwdX = view.fwd.x;
+            frame.fwdZ = view.fwd.z;
+        }
+    }
+    const auto add = [&](float x, float z, radar::Icon icon, int cat = 0) {
+        radar::Dot d;
+        d.x = x; d.z = z; d.icon = icon; d.cat = cat;
+        frame.dots.push_back(std::move(d));
+    };
+    unsigned counts[5]{};
+    const bool radarLayer[]{true, gSettings.dzInfected, gSettings.dzAnimals, gSettings.dzVehicles};
+    constexpr webmap::Release release[]{webmap::Players, webmap::Infected, webmap::Animals, webmap::Vehicles};
+    constexpr radar::Icon icon[]{radar::Icon::Survivor, radar::Icon::Infected, radar::Icon::Animal, radar::Icon::Vehicle};
+    if (options.release & (webmap::Players | webmap::Infected | webmap::Animals | webmap::Vehicles)) {
+        for (const auto& d : snap.ents) {
+            if (d.kind < 1 || d.kind > 4) continue;
+            const size_t kind = size_t(d.kind - 1);
+            if (!radarLayer[kind] || !options.shares(release[kind]) || counts[kind] == 512) continue;
+            if (!std::isfinite(d.feet.x) || !std::isfinite(d.feet.z)) continue;
+            add(d.feet.x, d.feet.z, icon[kind]);
+            ++counts[kind];
+        }
+    }
+    if (options.shares(webmap::Loot) && gSettings.dzLoot && snap.loot) {
+        for (const auto& d : *snap.loot) {
+            if (counts[4] == 512) break;
+            if (!loot::visible(gSettings.dzLootCats, d.cat, d.name)) continue;
+            add(d.pos.x, d.pos.z, radar::Icon::Loot, d.cat);
+            ++counts[4];
+        }
+    }
+    webmap::publish(id, std::move(frame));
+}
+
 bool drawDayzFrame() {
     if (gDzGone.exchange(false)) {
-        logLine("[*] game closed");
-        if (gDma) gAutoResumeAt = GetTickCount64() + 3000;
+        logLine("[*] Game or DMA connection lost. Start again from the launcher.");
         stopEsp();
         return false;
     }
@@ -2395,6 +2464,7 @@ bool drawDayzFrame() {
         gDzMeHeldDraw = snap.meHeld;
         gDzOnlineDraw = snap.online;
         projectDz(snap, view, me);
+        publishWebmap(snap, view);
 
         {
             static std::vector<trigger::Cand> trigCands;
@@ -2446,6 +2516,7 @@ bool drawDayzFrame() {
     } else {
         gBoxes.clear();
         gDzLootPts.clear();
+        if (gSettings.webmap.enabled) webmap::clear();
         gDzRadar.ok = false;
         trigger::update({}, 0.f, 0.f);
         static std::string lastRxSeen2;
@@ -2908,7 +2979,7 @@ void paint(HDC hdc, int w, int h) {
     BitBlt(hdc, 0, 0, w, h, mem, 0, 0, SRCCOPY);
 }
 
-enum class Run { Idle, Attaching, Running } gRun = Run::Idle;
+enum class Run { Idle, Attaching, Stopping, Running } gRun = Run::Idle;
 unsigned gGen = 0;
 std::shared_ptr<std::atomic<bool>> gCancel;
 HWND gPanel = nullptr, gCtl = nullptr;
@@ -2940,11 +3011,20 @@ PanelInfo espInfo() {
 void destroyRadarScreen();
 
 void stopEsp() {
+    if (gRun == Run::Attaching) {
+        if (gCancel) *gCancel = true;
+        gRun = Run::Stopping;
+        logLine("[*] Cancelling attach");
+        if (gPanel) InvalidateRect(gPanel, nullptr, FALSE);
+        return;
+    }
+    if (gRun == Run::Stopping) return;
     ++gGen;
     if (gCancel) *gCancel = true;
     gCancel.reset();
     destroyRadarScreen();
     stopDzThread();
+    if (trigger::connected()) trigger::disconnectDevice();
     gGpu.reset();
     gGpuFails = 0;
     if (gOverlay) DestroyWindow(gOverlay);
@@ -2960,6 +3040,12 @@ void stopEsp() {
     gDzRoster.clear();
     gDzEntNetId.clear();
     gDzRadar = DzRadar{};
+    {
+        std::lock_guard<std::mutex> lock(gDzMapMx);
+        gDzMapSeenWorld = 0;
+    }
+    gDzMapRedetect = true;
+    webmap::clear();
     gDzEntKind.clear();
     gDzEntPos.clear();
     gDzEntVs.clear();
@@ -3138,6 +3224,7 @@ void syncRadarScreen() {
     }
 
     radar::Config cfg;
+    cfg.webmap = gSettings.webmap;
     cfg.loot = gSettings.dzLoot;
     cfg.lootMask = gSettings.dzLootCats & loot::kAll;
     cfg.filter = loot::filter();
@@ -3191,6 +3278,15 @@ void syncRadarScreen() {
         saveSettings(gSettings);
         if (gPanel) InvalidateRect(gPanel, nullptr, FALSE);
         return;
+    }
+    if (cfg.webmapChanged) {
+        gSettings.webmap = cfg.webmap;
+        webmap::configure(gSettings.webmap, exeDir());
+        saveSettingsSoon();
+    }
+    if (cfg.openWebmap) {
+        const auto url = "http://127.0.0.1:" + std::to_string(gSettings.webmap.port) + "/";
+        ShellExecuteA(nullptr, "open", url.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     }
     const bool zoomed = zoom != gSettings.dzRadarZoom;
     gSettings.dzRadarZoom = zoom;
@@ -3369,7 +3465,7 @@ bool createOverlay() {
     return true;
 }
 
-void startEsp(bool recovering = false) {
+void startEsp() {
     if (gRun != Run::Idle) return;
     gDma = gSettings.dma;
     gFull = gDma && gSettings.fullscreen;
@@ -3421,7 +3517,7 @@ void startEsp(bool recovering = false) {
     auto cancel = gCancel = std::make_shared<std::atomic<bool>>(false);
     logLine(gDma ? "[*] waiting for DayZ_x64.exe on the target PC over DMA (offline mode, spawned in)"
                  : "[*] waiting for DayZ_x64.exe (offline mode, spawned in)");
-    std::thread([gen, cancel, recovering, dma = gDma, device = gSettings.device, dmaDir = gSettings.dmaDir, ctl = gCtl] {
+    std::thread([gen, cancel, dma = gDma, device = gSettings.device, dmaDir = gSettings.dmaDir, ctl = gCtl] {
         auto res = std::make_unique<AttachResult>();
         res->gen = gen;
         res->proc = dma ? makeDmaProcess(device, dmaDir, true) : makeLocalProcess();
@@ -3429,63 +3525,74 @@ void startEsp(bool recovering = false) {
 #ifndef HIRSCHGANGWARE_NO_DIAG
         std::string lastErr;
 #endif
-        while (!res->proc->attach(kGameExe, err)) {
-            if (*cancel) return;
-            if (recovering && err.rfind("fatal: MemProcFS init failed", 0) == 0) {
-                res->proc = makeDmaProcess(device, dmaDir, true);
-                Sleep(1000);
+        const auto attach = [&] {
+            while (!*cancel && !res->proc->attach(kGameExe, err)) {
                 if (*cancel) return;
-                continue;
-            }
-            if (err.rfind("fatal:", 0) == 0) {
-                res->err = err.substr(7);
-                res->proc.reset();
-                PostMessage(ctl, WM_ATTACHED, 0, reinterpret_cast<LPARAM>(res.release()));
-                return;
-            }
+                if (err.rfind("fatal:", 0) == 0) {
+                    res->err = err.substr(7);
+                    res->proc.reset();
+                    return;
+                }
 #ifndef HIRSCHGANGWARE_NO_DIAG
-            if (dma && err != lastErr) logLine("[*] %s", (lastErr = err).c_str());
+                if (dma && err != lastErr) logLine("[*] %s", (lastErr = err).c_str());
 #endif
-            Sleep(500);
-        }
-        Image img;
-        std::vector<VTableInfo> vts;
-        const bool loaded = img.load(*res->proc, err);
-        for (const auto& [cls, kind] : {std::pair<const char*, int>{"DayZPlayer", 1}, {"DayZInfected", 2}}) {
-            if (loaded && findVTables(img, cls, vts, err)) {
-                for (const auto& v : vts) res->dzKinds[static_cast<uint64_t>(img.base) + v.rva] = kind;
-                logLine("[+] %s: %zu vtable(s)", cls, vts.size());
-            } else {
-                const uint64_t rva = kind == 1 ? 0x12E2160 : 0x12FBF70;
-                res->dzKinds[res->proc->module().base + rva] = kind;
-                logLine("[!] %s RTTI unavailable (%s); using RVA 0x%llX from DayZ 1.30 Main", cls, err.c_str(),
-                        static_cast<unsigned long long>(rva));
+                Sleep(500);
             }
-        }
-        if (loaded) {
-            for (const auto& [cls, kind] : {std::pair<const char*, int>{"DayZAnimal", 3}, {"Transport", 4}}) {
-                if (!findVTables(img, cls, vts, err)) { logLine("[!] %s RTTI unavailable (%s)", cls, err.c_str()); continue; }
-                for (const auto& v : vts) res->dzKinds.emplace(static_cast<uint64_t>(img.base) + v.rva, kind);
-                logLine("[+] %s: %zu vtable(s)", cls, vts.size());
+            if (*cancel) return;
+            Image img;
+            std::vector<VTableInfo> vts;
+            const bool loaded = img.load(*res->proc, err);
+            for (const auto& [cls, kind] : {std::pair<const char*, int>{"DayZPlayer", 1}, {"DayZInfected", 2}}) {
+                if (*cancel) return;
+                if (loaded && findVTables(img, cls, vts, err)) {
+                    for (const auto& v : vts) res->dzKinds[static_cast<uint64_t>(img.base) + v.rva] = kind;
+                    logLine("[+] %s: %zu vtable(s)", cls, vts.size());
+                } else {
+                    const uint64_t rva = kind == 1 ? 0x12E2160 : 0x12FBF70;
+                    res->dzKinds[res->proc->module().base + rva] = kind;
+                    logLine("[!] %s RTTI unavailable (%s); using RVA 0x%llX from DayZ 1.30 Main", cls, err.c_str(),
+                            static_cast<unsigned long long>(rva));
+                }
             }
-            for (const auto& [cls, cat] : {std::pair<const char*, int>{"Weapon", LC_Weapon}, {"Magazine", LC_Ammo}, {"Clothing_Base", LC_Clothing}}) {
-                if (!findVTables(img, cls, vts, err)) { logLine("[!] %s RTTI unavailable (%s)", cls, err.c_str()); continue; }
-                for (const auto& v : vts) res->dzLootVts.emplace(static_cast<uint64_t>(img.base) + v.rva, cat);
-                logLine("[+] loot class %s: %zu vtable(s)", cls, vts.size());
+            if (loaded) {
+                for (const auto& [cls, kind] : {std::pair<const char*, int>{"DayZAnimal", 3}, {"Transport", 4}}) {
+                    if (*cancel) return;
+                    if (!findVTables(img, cls, vts, err)) { logLine("[!] %s RTTI unavailable (%s)", cls, err.c_str()); continue; }
+                    for (const auto& v : vts) res->dzKinds.emplace(static_cast<uint64_t>(img.base) + v.rva, kind);
+                    logLine("[+] %s: %zu vtable(s)", cls, vts.size());
+                }
+                for (const auto& [cls, cat] : {std::pair<const char*, int>{"Weapon", LC_Weapon}, {"Magazine", LC_Ammo}, {"Clothing_Base", LC_Clothing}}) {
+                    if (!findVTables(img, cls, vts, err)) { logLine("[!] %s RTTI unavailable (%s)", cls, err.c_str()); continue; }
+                    for (const auto& v : vts) res->dzLootVts.emplace(static_cast<uint64_t>(img.base) + v.rva, cat);
+                    logLine("[+] loot class %s: %zu vtable(s)", cls, vts.size());
+                }
             }
-        }
-        if (*cancel) return;
-        PostMessage(ctl, WM_ATTACHED, 0, reinterpret_cast<LPARAM>(res.release()));
+        };
+        attach();
+        if (*cancel) res->proc.reset();
+        auto* result = res.release();
+        if (!PostMessage(ctl, WM_ATTACHED, 0, reinterpret_cast<LPARAM>(result))) delete result;
     }).detach();
 }
 
 LRESULT CALLBACK ctlProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == WM_ATTACHED) {
         std::unique_ptr<AttachResult> r(reinterpret_cast<AttachResult*>(lp));
-        if (r->gen != gGen || gRun != Run::Attaching) return 0;
+        if (r->gen != gGen) return 0;
+        if (gRun == Run::Stopping) {
+            r.reset();
+            gCancel.reset();
+            gRun = Run::Idle;
+            logLine("[*] Attach cancelled");
+            if (gPanel) InvalidateRect(gPanel, nullptr, FALSE);
+            return 0;
+        }
+        if (gRun != Run::Attaching) return 0;
         if (!r->proc) {
             logLine("[-] %s", r->err.c_str());
+            gRun = Run::Idle;
             stopEsp();
+            if (gPanel) InvalidateRect(gPanel, nullptr, FALSE);
             MessageBoxA(gPanel, r->err.c_str(), "HirschgangWare", MB_OK | MB_ICONERROR);
             return 0;
         }
@@ -3498,12 +3605,12 @@ LRESULT CALLBACK ctlProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         gCancel.reset();
         logLine("[+] attached: pid %lu, base 0x%llX. END quits.", static_cast<unsigned long>(gProc->pid()),
                 static_cast<unsigned long long>(gProc->module().base));
+        gRun = Run::Running;
         if (!createOverlay()) {
             logLine("[-] could not create the overlay window");
             stopEsp();
             return 0;
         }
-        gRun = Run::Running;
         if (gDma) startDzThread();
         return 0;
     }
@@ -3578,22 +3685,19 @@ int main(int argc, char** argv) {
     friends::load();
     trigger::load();
     loot::setFilter({gSettings.dzFilterMode, loot::parseList(gSettings.dzFilterList)});
-    const bool autoStart = argc > 1;
     int monitor = 0;
     long wantW = 0, wantH = 0;
-    if (autoStart) {
-        gSettings.dma = false;
-        gSettings.fullscreen = false;
-    }
+    bool requestedFullscreen = false;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--dma") gSettings.dma = true;
         else if (a == "--device" && i + 1 < argc) gSettings.device = argv[++i];
         else if (a == "--dma-dir" && i + 1 < argc) gSettings.dmaDir = argv[++i];
-        else if (a == "--fullscreen") gSettings.fullscreen = true;
+        else if (a == "--fullscreen") requestedFullscreen = gSettings.fullscreen = true;
         else if (a == "--gdi") gForceGdi = true;
         else if (a == "--loot") gSettings.dzLoot = true;
         else if (a == "--radar") gSettings.dzRadar = true;
+        else if (a == "--webmap") gSettings.webmap.enabled = true;
         else if (a == "--map" && i + 1 < argc) { gSettings.dzMap = argv[++i]; gSettings.dzMapAuto = false; }
         else if (a == "--local") gSettings.dma = false;
         else if (a == "--sweep") gWantSweep = true;
@@ -3603,13 +3707,13 @@ int main(int argc, char** argv) {
         } else {
             MessageBoxA(nullptr,
                 "HirschgangWare [--local | --dma] [--device fpga] [--dma-dir dir] [--fullscreen]\n"
-                "      [--monitor n|WxH] [--gdi] [--loot] [--radar] [--map name]\n"
-                "no args = just the panel",
+                "      [--monitor n|WxH] [--gdi] [--loot] [--radar] [--map name] [--webmap]\n"
+                "Options configure the launcher. Click Start to connect.",
                 "HirschgangWare", a == "-h" || a == "--help" ? MB_OK | MB_ICONINFORMATION : MB_OK | MB_ICONERROR);
             return a == "-h" || a == "--help" ? 0 : 2;
         }
     }
-    if (autoStart && gSettings.fullscreen && !gSettings.dma) {
+    if (requestedFullscreen && !gSettings.dma) {
         MessageBoxA(nullptr, "--fullscreen only applies with --dma", "HirschgangWare", MB_OK | MB_ICONERROR);
         return 2;
     }
@@ -3633,6 +3737,7 @@ int main(int argc, char** argv) {
 #ifndef HIRSCHGANGWARE_NO_DIAG
     openLog();
     trigger::setLog([](const char* s) { logLine("%s", s); });
+    webmap::configure(gSettings.webmap, exeDir());
     trigger::setRemoteKeys([] { return gProc ? gProc->remoteKeySample() : dma_keyboard::Sample{}; });
     installCrashHandlers();
     DeleteFileA((exeDir0() + "\\HirschgangWare_old.exe").c_str());
@@ -3640,7 +3745,7 @@ int main(int argc, char** argv) {
     const bool fineTimer = timeBeginPeriod(1) == TIMERR_NOERROR;
     std::string args;
     for (int i = 1; i < argc; ++i) args += std::string(" ") + argv[i];
-    logLine("[log] HirschgangWare " HIRSCHGANGWARE_VERSION " started:%s (per-monitor dpi %s)", autoStart ? args.c_str() : " (panel)", perMonitorDpi ? "on" : "unavailable");
+    logLine("[log] HirschgangWare " HIRSCHGANGWARE_VERSION " launcher%s (per-monitor dpi %s)", args.c_str(), perMonitorDpi ? "on" : "unavailable");
 
     tel::start([](const char* l) { logLine("%s", l); });
 
@@ -3656,15 +3761,12 @@ int main(int argc, char** argv) {
     RegisterClassA(&cc);
     gCtl = CreateWindowExA(0, cc.lpszClassName, "", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, cc.hInstance, nullptr);
 
-    gPanel = createPanel(gSettings, {[] { gAutoResumeAt = 0; startEsp(); }, [] { gAutoResumeAt = 0; stopEsp(); },
-                                     [] { return gRun != Run::Idle; }, [] { return espInfo(); }});
+    gPanel = createPanel(gSettings, {[] { startEsp(); }, [] { stopEsp(); },
+                                     [] { return gRun != Run::Idle; }, [] { return espInfo(); },
+                                     [] { return gRun == Run::Stopping; }});
     if (!gPanel) {
         logLine("[-] could not create the panel (error %lu)", GetLastError());
         return 1;
-    }
-    if (autoStart) {
-        if (gSettings.dma) gSettings.dzRadarScreen = true;
-        startEsp();
     }
 
 #ifndef HIRSCHGANGWARE_NO_DIAG
@@ -3698,22 +3800,16 @@ int main(int argc, char** argv) {
             }
             tabWas = tabDown;
         }
-        if (gAutoResumeAt && gRun == Run::Idle && GetTickCount64() >= gAutoResumeAt) {
-            gAutoResumeAt = 0;
-            logLine("[*] auto-resume: attaching again");
-            startEsp(true);
-        }
-        trigger::pollInputs();
         if (gRun == Run::Running && gOverlay) {
+            trigger::pollInputs();
             runFrame();
             if (!gGpu && !gSettings.uncapped && FAILED(DwmFlush())) Sleep(5);
         } else {
-            syncRadarScreen();
-            trigger::update({}, 0.f, 0.f);
             MsgWaitForMultipleObjects(0, nullptr, FALSE, 50, QS_ALLINPUT);
         }
     }
     stopEsp();
+    webmap::shutdown();
     flushSettings(true);
     if (fineTimer) timeEndPeriod(1);
     tel::stop();

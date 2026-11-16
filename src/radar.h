@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "loot.h"
+#include "webmap.h"
 
 namespace radar {
 
@@ -90,6 +91,9 @@ struct Config {
         bool crosshair = true;
         int crosshairSize = 10;
     } esp;
+    webmap::Options webmap;
+    bool webmapChanged = false;
+    bool openWebmap = false;
     bool showSetup = false;
     bool sideOpen = true;
     bool menuOpen = false;

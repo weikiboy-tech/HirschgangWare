@@ -8,8 +8,10 @@
 #include <string>
 #include <vector>
 
+#include "webmap.h"
+
 struct EspSettings {
-    bool dma = false;
+    bool dma = true;
     std::string device = "fpga";
     std::string dmaDir;
     bool fullscreen = true;
@@ -51,6 +53,7 @@ struct EspSettings {
     int dzRadarHeadingLen = 150;
     int dzFilterMode = 0;
     std::string dzFilterList;
+    webmap::Options webmap;
     bool crosshair = true;
     int crosshairSize = 10;
 };
@@ -82,5 +85,6 @@ struct PanelHooks {
     std::function<void()> start, stop;
     std::function<bool()> running;
     std::function<PanelInfo()> info;
+    std::function<bool()> stopping;
 };
 HWND createPanel(EspSettings& s, PanelHooks hooks);
