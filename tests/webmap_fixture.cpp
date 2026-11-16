@@ -26,7 +26,9 @@ int main(int argc, char** argv) {
             frame.mapSize = 15360;
             frame.meName = "private-name";
             radar::Dot player;
-            player.x = 500; player.z = 1000;
+            player.x = 500; player.z = 1000; player.fwdX = 1; player.name = "private-player";
+            frame.dots.push_back(player);
+            player.x = 600; player.fwdX = 0;
             frame.dots.push_back(player);
             radar::Dot loot;
             loot.icon = radar::Icon::Loot; loot.x = x; loot.z = 2 * x;
@@ -41,6 +43,7 @@ int main(int argc, char** argv) {
         if (line == "quit") break;
         options.enabled = line != "off";
         options.release = line == "hide" ? 0 : webmap::CurrentMap | webmap::Own | webmap::Heading | webmap::Loot;
+        if (line == "players") options.release |= webmap::Players;
         webmap::configure(options, argv[1]);
     }
     stop = true;

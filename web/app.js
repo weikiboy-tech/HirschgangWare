@@ -1,4 +1,4 @@
-import { Camera, clamp, radians, screenPoint, worldPoint } from "./map.js";
+import { Camera, clamp, headingOnMap, radians, screenPoint, worldPoint } from "./map.js";
 import { LiveConnection, layers } from "./live.js";
 
 const $ = id => document.getElementById(id);
@@ -108,7 +108,7 @@ function label(name, x, y, color = "#ecf3f3", declutter = false) {
   ctx.fillText(name, x, y);
 }
 
-function marker(p, radius, color, name, heading) {
+function marker(p, radius, color, name, heading, sideLabel = false) {
   const s = screenPoint(p, camera, width, height);
   if (s.x < -60 || s.y < -60 || s.x > width + 60 || s.y > height + 60) return;
   ctx.save();
@@ -118,7 +118,7 @@ function marker(p, radius, color, name, heading) {
   ctx.fillStyle = color;
   ctx.beginPath();
   if (Number.isFinite(heading)) {
-    ctx.rotate(radians(heading - camera.angle));
+    ctx.rotate(radians(headingOnMap(heading, camera.angle)));
     ctx.moveTo(0, -radius * 1.65);
     ctx.lineTo(radius, radius);
     ctx.lineTo(0, radius * .6);
@@ -128,7 +128,32 @@ function marker(p, radius, color, name, heading) {
     ctx.arc(0, 0, radius, 0, Math.PI * 2);
   }
   ctx.fill(); ctx.stroke(); ctx.restore();
-  if (name && prefs.labels) label(name, s.x, s.y - radius - 5, color);
+  if (name && prefs.labels) label(name, sideLabel ? s.x + radius + 42 : s.x, sideLabel ? s.y + 4 : s.y - radius - 5, color);
+}
+
+function playerDirection(p, radius) {
+  if (!Number.isFinite(p.heading)) return;
+  const s = screenPoint(p, camera, width, height);
+  if (s.x < -60 || s.y < -60 || s.x > width + 60 || s.y > height + 60) return;
+  const length = Math.max(17, radius * 3.5);
+  ctx.save();
+  ctx.translate(s.x, s.y);
+  ctx.rotate(radians(headingOnMap(p.heading, camera.angle)));
+  ctx.beginPath();
+  ctx.moveTo(0, -radius);
+  ctx.lineTo(0, -length);
+  ctx.moveTo(-4, -length + 5);
+  ctx.lineTo(0, -length);
+  ctx.lineTo(4, -length + 5);
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = "#09141b";
+  ctx.lineWidth = 4;
+  ctx.stroke();
+  ctx.strokeStyle = colors.players;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.restore();
 }
 
 function compass() {
@@ -171,7 +196,11 @@ function draw(now) {
     if (matchLive()) {
       for (const [id, dots] of Object.entries(live.layers)) {
         if (prefs.filters[id] === false) continue;
-        for (const p of dots) marker(p, prefs.markerSize * .65, colors[id], layerNames[id]);
+        const radius = prefs.markerSize * .65;
+        for (const p of dots) {
+          if (id === "players") playerDirection(p, radius);
+          marker(p, radius, colors[id], layerNames[id], undefined, id === "players");
+        }
       }
       if (camera.marker) marker(camera.marker, prefs.markerSize, "#65f1d3", "Eigene Position", camera.marker.heading);
     }

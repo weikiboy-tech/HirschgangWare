@@ -1,6 +1,7 @@
 export const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
 export const radians = degrees => degrees * Math.PI / 180;
 export const shortestTurn = (from, to) => ((to - from + 180) % 360 + 360) % 360 - 180;
+export const headingOnMap = (heading, cameraAngle) => shortestTurn(cameraAngle, heading);
 
 export function worldToImage(x, z, size, width, height) {
   return { x: x * width / size, y: (size - z) * height / size };

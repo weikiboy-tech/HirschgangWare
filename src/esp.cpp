@@ -2403,9 +2403,10 @@ void publishWebmap(const DzSnap& snap, const dz::Cam& view) {
             frame.fwdZ = view.fwd.z;
         }
     }
-    const auto add = [&](float x, float z, radar::Icon icon, int cat = 0) {
+    const auto add = [&](float x, float z, radar::Icon icon, int cat = 0, float fwdX = 0, float fwdZ = 0) {
         radar::Dot d;
         d.x = x; d.z = z; d.icon = icon; d.cat = cat;
+        d.fwdX = fwdX; d.fwdZ = fwdZ;
         frame.dots.push_back(std::move(d));
     };
     unsigned counts[5]{};
@@ -2418,7 +2419,8 @@ void publishWebmap(const DzSnap& snap, const dz::Cam& view) {
             const size_t kind = size_t(d.kind - 1);
             if (!radarLayer[kind] || !options.shares(release[kind]) || counts[kind] == 512) continue;
             if (!std::isfinite(d.feet.x) || !std::isfinite(d.feet.z)) continue;
-            add(d.feet.x, d.feet.z, icon[kind]);
+            if (d.kind == 1) add(d.feet.x, d.feet.z, icon[kind], 0, d.fwdX, d.fwdZ);
+            else add(d.feet.x, d.feet.z, icon[kind]);
             ++counts[kind];
         }
     }

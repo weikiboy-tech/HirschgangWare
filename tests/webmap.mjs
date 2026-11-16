@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 const source = file => "data:text/javascript;base64," +
   readFileSync(new URL(file, import.meta.url)).toString("base64");
-const { Camera, imageToWorld, screenPoint, shortestTurn, worldPoint, worldToImage } = await import(source("../web/map.js"));
+const { Camera, imageToWorld, screenPoint, shortestTurn, headingOnMap, worldPoint, worldToImage } = await import(source("../web/map.js"));
 const { decode, LiveConnection } = await import(source("../web/live.js"));
 
 const near = (a,b) => assert.ok(Math.abs(a-b) < 1e-7, a + " differs from " + b);
@@ -37,6 +37,12 @@ for (const angle of [0,90,180,270]) {
   const original=worldPoint(screenPoint({x:25,z:350},c,600,400),c,600,400);
   near(original.x,25); near(original.z,350);
 }
+for (const heading of [0, 90, 180, 270]) {
+  const expected = [0, 90, -180, -90][heading / 90];
+  assert.equal(headingOnMap(heading, 0), expected);
+  assert.equal(headingOnMap(heading, heading), 0);
+}
+assert.equal(headingOnMap(1,359),2);
 assert.equal(shortestTurn(359,1),2);
 assert.equal(shortestTurn(1,359),-2);
 c.setFollow(true);
@@ -61,6 +67,12 @@ assert.equal(c.follow,true);
 
 const valid=JSON.stringify({v:1,live:true,map:"chernarusplus",me:{x:1,z:2,heading:-179},layers:{loot:[{x:3,z:4,category:2}]}});
 assert.equal(decode(valid).me.heading,-179);
+const playerPacket = JSON.parse(valid);
+playerPacket.layers.players = [{x:3,z:4,heading:90},{x:5,z:6}];
+assert.equal(decode(JSON.stringify(playerPacket)).layers.players[0].heading,90);
+assert.equal(decode(JSON.stringify(playerPacket)).layers.players[1].heading,undefined);
+playerPacket.layers.players[0].heading = "90";
+assert.equal(decode(JSON.stringify(playerPacket)),null);
 for(const bad of ["", "{}", "[", valid.replace("chernarusplus","../secret"),
     valid.replace('"x":1','"x":"1"'), valid.replace('"loot"','"private"'),
     valid.replace('"live":true','"live":false'), valid.replace('"layers":{','"layers":{"__proto__":[],')])

@@ -178,6 +178,21 @@ try:
         snap = json.loads(body)
         assert op == 1 and snap["live"] is False and snap["map"] is None and snap["me"] is None and snap["layers"] == {}
 
+    server.stdin.write("players\n")
+    server.stdin.flush()
+    wait_http()
+    _, sock, stream = websocket()
+    with sock, stream:
+        for _ in range(12):
+            _, body = frame(stream)
+            players = json.loads(body)["layers"].get("players")
+            if players:
+                assert players == [{"x": 500, "z": 1000, "heading": 90}, {"x": 600, "z": 1000}]
+                assert b"private-player" not in body
+                break
+        else:
+            raise AssertionError("missing released player heading")
+
     server.stdin.write("off\n")
     server.stdin.flush()
     for _ in range(30):

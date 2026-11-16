@@ -186,6 +186,11 @@ constexpr Layer kLayers[] = {
     {Loot, radar::Icon::Loot, "loot"},
 };
 
+void appendHeading(std::ostream& out, float x, float z) {
+    if (std::isfinite(x) && std::isfinite(z) && std::hypot(x, z) > 0.001f)
+        out << ",\"heading\":" << std::atan2(x, z) * (180.0 / 3.14159265358979323846);
+}
+
 std::string packet(const Options& opt, const std::shared_ptr<const Snapshot>& snap) {
     const bool live = opt.shares(CurrentMap) && snap && Clock::now() - snap->captured < 1500ms;
     const std::string map = live && opt.shares(CurrentMap) && validId(snap->map) ? snap->map : "";
@@ -197,9 +202,7 @@ std::string packet(const Options& opt, const std::shared_ptr<const Snapshot>& sn
         inside(snap->frame.meX, snap->frame.meZ, snap->frame.mapSize)) {
         const auto& fr = snap->frame;
         out << "{\"x\":" << fr.meX << ",\"z\":" << fr.meZ;
-        if (opt.shares(Heading) && std::isfinite(fr.fwdX) && std::isfinite(fr.fwdZ) &&
-            std::hypot(fr.fwdX, fr.fwdZ) > 0.001f)
-            out << ",\"heading\":" << std::atan2(fr.fwdX, fr.fwdZ) * (180.0 / 3.14159265358979323846);
+        if (opt.shares(Heading)) appendHeading(out, fr.fwdX, fr.fwdZ);
         out << '}';
     } else {
         out << "null";
@@ -217,6 +220,7 @@ std::string packet(const Options& opt, const std::shared_ptr<const Snapshot>& sn
             if (count++) out << ',';
             out << "{\"x\":" << d.x << ",\"z\":" << d.z;
             if (d.icon == radar::Icon::Loot) out << ",\"category\":" << d.cat;
+            if (d.icon == radar::Icon::Survivor) appendHeading(out, d.fwdX, d.fwdZ);
             out << '}';
             if (count == 512) break;
         }

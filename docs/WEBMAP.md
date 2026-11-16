@@ -54,7 +54,8 @@ Server positions outside the selected world's bounds and nonfinite positions
 are discarded. The own position is derived from the game snapshot, not from
 the fallback camera location. No player names, loadouts, server information,
 credentials, process identifiers or memory addresses are published. Entity
-labels in the browser are generic. Clicking the own marker or the GPS button
+labels in the browser are generic. The player layer includes a direction
+arrow when a valid facing direction is available. Clicking the own marker or the GPS button
 enables Follow. Dragging disables Follow and leaves rotation enabled. Zooming
 preserves Follow. Waypoints, filters and tracking preferences are specific
 to the browser and origin.
