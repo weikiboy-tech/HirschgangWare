@@ -4,6 +4,8 @@
 // sent to the little USB box which sits in-line with the gaming PC's mouse.
 // The box also reports the physical mouse/keyboard, so the trigger key is the
 // one on the *gaming* keyboard (works PC to PC). Device config lives in trigger.ini.
+#include "keyboard_bitmap.h"
+
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -29,14 +31,17 @@ struct Cand {
     uint64_t id = 0;
 };
 
+enum class InputSource { Legacy, MainPc, SecondPc, Box };
+
 struct Config {
     bool enabled = false;
     bool playersOnly = true;
     bool animals = false;
     int key = 2;  // 1..5 mouse buttons, else key code (2 = right mouse default)
+    InputSource keySource = InputSource::Legacy;
     bool keyFromDevice = true;
     bool keyFromLocal = true;  // also accept the key on THIS pc (both PCs work)
-    bool keyRemote = true;     // also accept the key typed on the gaming PC (read via DMA)
+    bool keyRemote = true;     // exclusive input from the target Windows session over PCIe
     int keyHid = 0;            // HID usage of the bound key (for the box side), 0 = unknown
     bool useBinary = true;     // MAKCU: use the binary input stream frames (DE AD ... 52)
     int delayMs = 50;    // dwell time before the shot
@@ -69,6 +74,7 @@ struct Live {
     float px = 0;
     int bone = -1;
     bool keyHeld = false;
+    uint64_t keyPresses = 0;
     int clicks = 0;
     int heldMs = 0;
     std::string note;
@@ -100,10 +106,10 @@ void clickOnce();  // one test click through the box
 void update(const std::vector<Cand>& cands, float cx, float cy);
 
 void setLog(void (*fn)(const char*));
-void setRemoteKeys(bool (*fn)(uint8_t* out256));  // target keyboard state via DMA
+void setRemoteKeys(dma_keyboard::Sample (*fn)());
+void pollInputs();
 bool remoteKeysReady();
-void setKeyScan(void (*fn)());
-void keyScanNow();
+const char* keySourceLabel();
 const std::string& ident();
 void sendRaw(const std::string& cmd);
 int monitorPresetCount();

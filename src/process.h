@@ -4,6 +4,8 @@
 #endif
 #include <windows.h>
 
+#include "keyboard_bitmap.h"
+
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -44,26 +46,17 @@ public:
     virtual size_t readMany(std::vector<ReadReq>& reqs) const;
 
     virtual void maintain() {}
-    virtual void keyScan() const {}  // locate the async key state array by differential scan
-
-    // physical keyboard state of the target (async key state table) - for trigger keys
-    // that are pressed on the gaming PC when the keyboard is NOT routed through the box
-    virtual bool keyState(uint8_t out[256]) const { (void)out; return false; }
+    virtual dma_keyboard::Sample remoteKeySample() const { return {}; }
 
     bool readPtr(uintptr_t addr, uint32_t ptrSize, uint64_t& out) const;
 
     DWORD pid() const { return pid_; }
     const ModuleInfo& module() const { return mod_; }
 
-    mutable std::string keyInfo_;  // diagnostics for the DMA key path
-public:
-    const std::string& keyInfo() const { return keyInfo_; }
 protected:
     DWORD pid_ = 0;
     ModuleInfo mod_;
 };
-
-void setDmaKeyLog(void (*fn)(const char*));  // diagnostics for the DMA key path
 
 std::unique_ptr<Process> makeLocalProcess();
 

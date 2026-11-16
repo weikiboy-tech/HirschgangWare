@@ -8,7 +8,7 @@
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{A1C0DE00-0003-4000-8000-000000000003}</ProjectGuid>
-    <RootNamespace>Ickza</RootNamespace>
+    <RootNamespace>HirschgangWare</RootNamespace>
     <Keyword>Win32Proj</Keyword>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
@@ -22,7 +22,7 @@
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="PropertySheets">
-    <Import Project="$(SolutionDir)Ickza.props" />
+    <Import Project="$(SolutionDir)HirschgangWare.props" />
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <ItemDefinitionGroup>
@@ -34,7 +34,7 @@
       <SubSystem>Windows</SubSystem>
       <EntryPointSymbol>mainCRTStartup</EntryPointSymbol>
       <GenerateMapFile>true</GenerateMapFile>
-      <MapFileName>$(SolutionDir)build\Ickza.map</MapFileName>
+      <MapFileName>$(SolutionDir)build\HirschgangWare.map</MapFileName>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -43,6 +43,7 @@
     <ClCompile Include="src\radar.cpp" />
     <ClCompile Include="src\mapdl.cpp" />
     <ClCompile Include="src\loot.cpp" />
+    <ClCompile Include="src\trigger.cpp" />
     <ClCompile Include="src\imgui\imgui.cpp" />
     <ClCompile Include="src\imgui\imgui_draw.cpp" />
     <ClCompile Include="src\imgui\imgui_tables.cpp" />
@@ -68,6 +69,8 @@
     <ClInclude Include="src\loot.h" />
     <ClInclude Include="src\mapdl.h" />
     <ClInclude Include="src\process.h" />
+    <ClInclude Include="src\keyboard_bitmap.h" />
+    <ClInclude Include="src\keyboard_resolver.h" />
     <ClInclude Include="src\radar.h" />
     <ClInclude Include="src\rtti.h" />
     <ClInclude Include="src\speedtest.h" />
@@ -75,6 +78,11 @@
     <ClInclude Include="src\ui.h" />
     <ClInclude Include="src\clock.h" />
     <ClInclude Include="src\version.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="HirschgangWare.rc" />
+    <Image Include="HirschgangWare.ico" />
+    <ClInclude Include="src\brand.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

@@ -1,7 +1,7 @@
 #include "image.h"
 
 #include <algorithm>
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
 #include <fstream>
 #include <iterator>
 #endif
@@ -73,7 +73,7 @@ bool Image::load(const Process& p, std::string& err) {
     return true;
 }
 
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
 bool Image::loadFile(const std::string& path, std::string& err) {
     std::ifstream f(path, std::ios::binary);
     if (!f) {

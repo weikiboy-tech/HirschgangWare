@@ -104,7 +104,7 @@ bool visible();
 
 void reloadMaps();
 
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
 void setLog(void (*fn)(const char*));
 #endif
 

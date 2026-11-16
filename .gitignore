@@ -8,6 +8,7 @@ build/
 .vs/
 *.suo
 keyarray.txt
+dist/HirschgangWare.ini
 dist/Ickza.ini
 dist/trigger.ini
 dist/friends.txt

@@ -1,6 +1,7 @@
 ﻿
 #define NOMINMAX
 #include "radar.h"
+#include "brand.h"
 #include "friends.h"
 #include "trigger.h"
 
@@ -40,7 +41,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 namespace radar {
 
 namespace {
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
 void (*gLog)(const char*) = nullptr;
 void rlog(const char* fmt, ...) {
     char b[256];
@@ -53,7 +54,7 @@ void rlog(const char* fmt, ...) {
 }
 #endif
 }
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
 void setLog(void (*fn)(const char*)) { gLog = fn; }
 #endif
 
@@ -321,15 +322,16 @@ bool createWindow(const RECT* target) {
         wc.lpfnWndProc = wndProc;
         wc.hInstance = inst;
         wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-        wc.lpszClassName = "ickza_radar";
+        wc.lpszClassName = "hirschgangware_radar";
+        wc.hIcon = LoadIconA(GetModuleHandleA(nullptr), MAKEINTRESOURCEA(brand::iconResource));
         RegisterClassA(&wc);
         registered = true;
     }
     if (target)
-        gWnd = CreateWindowExA(0, "ickza_radar", "Ickza Radar (F8 / Esc hides)", WS_POPUP | WS_VISIBLE, target->left, target->top,
+        gWnd = CreateWindowExA(0, "hirschgangware_radar", "HirschgangWare (F8 / Esc hides)", WS_POPUP | WS_VISIBLE, target->left, target->top,
                                target->right - target->left, target->bottom - target->top, nullptr, nullptr, inst, nullptr);
     else
-        gWnd = CreateWindowExA(0, "ickza_radar", "Ickza Radar (F8 / Esc hides)", WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT,
+        gWnd = CreateWindowExA(0, "hirschgangware_radar", "HirschgangWare (F8 / Esc hides)", WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT,
                                1280, 820, nullptr, nullptr, inst, nullptr);
     if (!gWnd) {
         rlog("[-] radar: could not create the window (error %lu)", GetLastError());
@@ -604,14 +606,12 @@ void drawBadge(ImDrawList* dl, ImVec2 c, float r, int glyph, ImU32 col, float a 
 
 void drawLogo(ImDrawList* dl, ImVec2 c, float r) {
     dl->AddCircleFilled(c, r, IM_COL32(36, 226, 196, 26), 0);
-    dl->PathLineTo(c);
-    dl->PathArcTo(c, r - 1, -kPi / 2, -kPi / 2 + 1.1f, 16);
-    dl->PathFillConvex(IM_COL32(36, 226, 196, 110));
-    dl->AddCircle(c, r - 0.5f, th::Accent, 0, 1.8f);
-    dl->AddCircle(c, r * 0.5f, IM_COL32(36, 226, 196, 110), 0, 1.f);
-    dl->AddLine(c, ImVec2(c.x + std::cos(-kPi / 2 + 1.1f) * (r - 1), c.y + std::sin(-kPi / 2 + 1.1f) * (r - 1)), th::Accent, 1.6f);
-    dl->AddCircleFilled(c, 2.f, th::Accent, 0);
-    dl->AddCircleFilled(ImVec2(c.x + r * 0.42f, c.y - r * 0.5f), 2.2f, IM_COL32(255, 255, 255, 235), 0);
+    dl->AddCircle(c, r - 0.7f, th::Accent, 0, 1.5f);
+    for (const float side : {-1.f, 1.f})
+        for (const auto& line : brand::deer)
+            dl->AddLine(ImVec2(c.x + side * line.x1 * r, c.y + line.y1 * r),
+                        ImVec2(c.x + side * line.x2 * r, c.y + line.y2 * r),
+                        th::Accent, std::max(1.3f, r * 0.11f));
 }
 
 void headingLine(ImDrawList* dl, ImVec2 c, float fx, float fz, float startR, float len, ImU32 col) {
@@ -1344,7 +1344,7 @@ void drawTriggerWindow(bool& ch) {
         if (chip(trigger::probing() ? "Probing - press keys on the MAIN pc##mprobe" : "Probe input (find enable command)##mprobe",
                  trigger::probing(), ImGui::GetContentRegionAvail().x))
             trigger::probeInput();
-        ImGui::TextDisabled("probe logs [trg] probe + rxraw into Ickza.log");
+        ImGui::TextDisabled("probe logs [trg] probe + rxraw into HirschgangWare.log");
         {
             static std::string mraw = "km.version()";
             if (textField("manual command##mraw", mraw)) {}
@@ -1352,24 +1352,28 @@ void drawTriggerWindow(bool& ch) {
         }
 
         section("TRIGGER");
-        char kl[64], lbl[96];
+        char kl[64], lbl[128];
         keyLabel(kl, sizeof kl);
-        std::snprintf(lbl, sizeof lbl, trigger::capturing() ? "Press the trigger key...##mk" : "Trigger key: %s  [bind]##mk", kl);
+        std::snprintf(lbl, sizeof lbl, trigger::capturing() ? "Press the trigger key...##mk" : "Trigger key: %s - %s  [bind]##mk", trigger::keySourceLabel(), kl);
         if (chip(lbl, trigger::capturing(), ImGui::GetContentRegionAvail().x)) {
             if (trigger::capturing()) trigger::stopCapture();
             else if (!trigger::justBound()) trigger::startCapture();
             ch = true;
         }
-        ImGui::TextDisabled("Key mode: HOLD (always) - bind it by pressing the key on the gaming PC");
-        bool fromDev = tc.keyFromDevice;
-        if (switchRow("accept the key from the box", &fromDev)) { tc.keyFromDevice = fromDev; trigger::touch(); }
-        bool fromLoc = tc.keyFromLocal;
-        if (switchRow("accept the key on this PC", &fromLoc)) { tc.keyFromLocal = fromLoc; trigger::touch(); }
-        bool fromRem = tc.keyRemote;
-        if (switchRow("accept keys typed on the gaming PC (DMA)", &fromRem)) { tc.keyRemote = fromRem; trigger::touch(); }
-        if (tc.keyRemote) ImGui::TextDisabled("dma key state: %s", trigger::remoteKeysReady() ? "ready" : "not ready");
-        if (chip("Find key array (hold E) ##mfind", false, ImGui::GetContentRegionAvail().x)) trigger::keyScanNow();
-        ImGui::TextDisabled("both on = trigger fires from either PC / mouse button");
+        if (tc.keySource == trigger::InputSource::Legacy) {
+            bool fromRem = tc.keyRemote;
+            if (switchRow("Use PCIe input for this binding", &fromRem)) { tc.keyRemote = fromRem; trigger::touch(); }
+            if (!tc.keyRemote) {
+                bool fromDev = tc.keyFromDevice;
+                if (switchRow("accept the key from the box", &fromDev)) { tc.keyFromDevice = fromDev; trigger::touch(); }
+                bool fromLoc = tc.keyFromLocal;
+                if (switchRow("accept the key on this PC", &fromLoc)) { tc.keyFromLocal = fromLoc; trigger::touch(); }
+            }
+        }
+        if (trigger::capturing() || tc.keySource == trigger::InputSource::MainPc ||
+            (tc.keySource == trigger::InputSource::Legacy && tc.keyRemote))
+            ImGui::TextDisabled("PCIe input: %s", trigger::remoteKeysReady() ? "connected" : "disconnected");
+        ImGui::Text("Received presses: %llu", static_cast<unsigned long long>(trigger::live().keyPresses));
         bool po = tc.playersOnly;
         if (switchRow("Target: players only", &po)) { tc.playersOnly = po; trigger::touch(); }
         if (!tc.playersOnly) {
@@ -1439,13 +1443,14 @@ void drawSettingsBody(Config& cfg, const Counts& n, bool live, const std::vector
         const ImVec2 p = ImGui::GetCursorScreenPos();
         const float avail = ImGui::GetContentRegionAvail().x;
         drawLogo(dl, ImVec2(p.x + 15, p.y + 16), 15.f);
-        dl->AddText(gBold, 24.f, ImVec2(p.x + 40, p.y + 1), th::Text, "ICKZA");
-        const float bw = textSize(gBold, 24.f, "ICKZA").x;
-        dl->AddText(gBold, 12.f, ImVec2(p.x + 42 + bw + 6, p.y + 12), th::Accent, "RADAR");
         const char* st = live ? "LIVE" : "WAITING";
         const ImU32 sc = live ? IM_COL32(80, 230, 130, 255) : col32(th::Infected);
         const float sw = textSize(gBold, 11.f, st).x;
         const float liveX = p.x + avail - sw - 24 - (sidebar ? 26.f : 0.f);
+        const float titleWidth = std::max(1.f, liveX - p.x - 46.f);
+        const float titleSize = std::min(24.f, 24.f * titleWidth / textSize(gBold, 24.f, brand::name).x);
+        dl->AddText(gBold, titleSize, ImVec2(p.x + 40, p.y + (32.f - titleSize) / 2.f),
+                    th::Text, brand::name);
         const ImVec2 a(liveX, p.y + 8), b(liveX + sw + 24, p.y + 26);
         dl->AddRectFilled(a, b, withAlpha(sc, 0.14f), 9.f);
         const float pulse = live ? 0.55f + 0.45f * std::sin(float(ImGui::GetTime()) * 4.f) : 1.f;
@@ -1783,7 +1788,7 @@ void drawSettingsBody(Config& cfg, const Counts& n, bool live, const std::vector
 
     ImGui::Dummy(ImVec2(0, 8));
     if (chip("Setup window", false, ImGui::GetContentRegionAvail().x)) cfg.showSetup = true;
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("bring the Ickza setup window (PID, server, DMA speed, Start/Stop) to the front");
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("bring the HirschgangWare setup window (PID, server, DMA speed, Start/Stop) to the front");
     ImGui::Dummy(ImVec2(0, 8));
     ImGui::PushTextWrapPos(0.f);
     ImGui::TextDisabled("Wheel zoom, drag pan, right-click or Space recentres. Tab hides this panel, F8 or Esc hides the radar.");
@@ -1824,7 +1829,7 @@ void drawMenu(Config& cfg, const Counts& n, bool live, const std::vector<Online>
     ImGui::SetNextWindowSize(ImVec2(kSide + 40.f, std::min(float(gH) - 12.f, 780.f)), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowBgAlpha(0.96f);
     bool open = true;
-    if (ImGui::Begin("Ickza settings##menuwin", &open, ImGuiWindowFlags_NoSavedSettings)) {
+    if (ImGui::Begin("HirschgangWare settings##menuwin", &open, ImGuiWindowFlags_NoSavedSettings)) {
         ImGui::GetWindowViewport()->Flags |= ImGuiViewportFlags_TopMost;
         drawSettingsBody(cfg, n, live, online, false, nullptr);
     }
@@ -1844,8 +1849,8 @@ void drawWaiting() {
         dl->AddCircle(c, 30.f + ph * 120.f, IM_COL32(36, 226, 196, int(90 * (1 - ph))), 0, 1.5f);
     }
     drawLogo(dl, c, 30.f);
-    const ImVec2 bs = textSize(gBold, 34.f, "ICKZA");
-    dl->AddText(gBold, 34.f, ImVec2(c.x - bs.x / 2, c.y + 46), th::Text, "ICKZA");
+    const ImVec2 bs = textSize(gBold, 34.f, brand::name);
+    dl->AddText(gBold, 34.f, ImVec2(c.x - bs.x / 2, c.y + 46), th::Text, brand::name);
     const char* sub = "waiting for DayZ  -  camera not read yet";
     const ImVec2 ss = textSize(gFont, 14.f, sub);
     dl->AddText(gFont, 14.f, ImVec2(c.x - ss.x / 2, c.y + 90), th::Muted, sub);

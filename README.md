@@ -1,4 +1,4 @@
-# Ickza-DMA
+# HirschgangWare
 
 External **DayZ** cheat that reads memory over a **DMA card** (PCILeech / MemProcFS) from a second PC.
 ESP overlay + radar on the second monitor + triggerbot via **kmbox / MAKCU** (pure input injection, no memory writes).
@@ -15,7 +15,7 @@ ESP overlay + radar on the second monitor + triggerbot via **kmbox / MAKCU** (pu
 - **Triggerbot over kmbox / MAKCU**: connect the box, bind a trigger key (mouse 4/5/left/right/middle or a key), hold to shoot.
   Configurable delay, hit radius, hitboxes, targeting distance, players-only. The box injects while the physical mouse chain stays intact for the game.
 - Bind capture accepts input **from the box** and **from this PC**
-- All settings auto-saved (`Ickza.ini`, `trigger.ini`, `friends.txt` next to the exe)
+- All settings auto-saved (`HirschgangWare.ini`, `trigger.ini`, `friends.txt` next to the exe)
 
 ## Layout
 
@@ -23,7 +23,7 @@ ESP overlay + radar on the second monitor + triggerbot via **kmbox / MAKCU** (pu
 src/            cheat source (dma.cpp = VMM read layer, esp.cpp, radar.cpp, trigger.cpp, ...)
 third_party/    pcileech headers (vmmdll.h)
 dma/            runtime DLLs for the DMA device (vmm.dll, leechcore.dll, FTD3XX, dbghelp, info.db)
-dist/           ready-to-run build output (Ickza.exe + dma/ + maps/ + txt data)
+dist/           ready-to-run build output (HirschgangWare.exe + dma/ + maps/ + txt data)
 laptop/         helper files copied into a build (run script, loot tables)
 docs/           notes
 build.bat       MSVC build (needs "Desktop development with C++"; run: build.bat x64)
@@ -36,15 +36,15 @@ build.bat x64
 ```
 
 Needs Visual Studio / MSVC Build Tools with the C++ workload (uses `vswhere` + `vcvarsall`).
-Output: `build\Ickza.exe` (plus `build\dma`, `build\maps`, loot tables).
+Output: `build\HirschgangWare.exe` (plus `build\dma`, `build\maps`, loot tables).
 
 ## Run
 
 ```
-dist\Ickza.exe --dma --fullscreen
+dist\HirschgangWare.exe --dma --fullscreen
 ```
 
-`run_ickza.bat` does the same. **Only one DMA tool may own the card at a time** (close PureDMA / pcileech / SSZ).
+`run_hirschgangware.bat` does the same. **Only one DMA tool may own the card at a time** (close PureDMA / pcileech / SSZ).
 
 Keys: `F8` radar on/off · `Tab` collapse/expand settings sidebar · `MMB` on a radar player = mark/unmark friend · `END` exit.
 
@@ -52,7 +52,7 @@ Keys: `F8` radar on/off · `Tab` collapse/expand settings sidebar · `MMB` on a 
 
 | file | content |
 |---|---|
-| `Ickza.ini` | ESP/radar settings, range, minimap size, sidebar state |
+| `HirschgangWare.ini` | ESP/radar settings, range, minimap size, sidebar state |
 | `trigger.ini` | kmbox/MAKCU device, baud, commands, trigger key, delay, hitbox mask |
 | `friends.txt` | friend list (names, case-insensitive) |
 | `keyarray.txt` | found DMA key address (written once the key path verified it) |
@@ -68,21 +68,23 @@ DayZ updates move a few globals; currently patched for the latest build:
 
 If it says "waiting for DayZ" after a game update, these are the two values to find again.
 
-## DMA keyboard path
+## PCIe keyboard input
 
-A trigger key pressed on the **game PC** can also be read over DMA (`win32k` `gafAsyncKeyState`), so the
-trigger works even when the keyboard is not routed through the box. The address lives in session space and
-has to be searched, which used to cause hitching - the path is therefore bounded now:
+Build with `build.bat x64` and start HirschgangWare on the second PC in DMA mode. In the
+trigger panel select **Bind**, release the mouse button used to open the bind
+control, then press a key or mouse button on either PC. The binding displays
+and saves its source. **Received presses** increases once per new press and
+**HELD** stays on until release. The indicator works while trigger output is
+disabled or the output box is disconnected.
 
-* resolve runs **once**, the found address is kept in `keyarray.txt` (delete that file to force a fresh search)
-* verification (7 test keys, then a differential refine inside the win32k image) runs at most 6 attempts and
-  then stops - no periodic full-image reads any more (`refine confirmed ... periodic refine stopped`)
-* afterwards the path is passive: one 64 byte read per tick
-* if the read fails 3x (reboot / session moved) it re-verifies by itself
+HirschgangWare uses the game's Windows session to resolve and read the main PC's
+keyboard and mouse button bitmap. This backend is enabled on the tested
+target build **26200.9711**. Mouse movement does not bind. The main PC
+bitmap aggregates physical input devices on that PC and sampling can miss
+very brief taps. On loss of the DMA read the held state clears. Inputs held
+during a reconnect must be released before they can activate again.
 
-Off-switch (exactly the old behaviour: box + this PC only): `src/dma.cpp` -> `static constexpr bool keyEnable_ = false;`
-Details, evidence and measurements: `docs/INPUT_RESEARCH.md`, `docs/INPUT_DEBUG_HISTORY.md`.
-Standalone hardware check without the cheat: `tools\keyprobe.exe probe` (DMA card must be free).
+[Address diagnosis and hardware measurements](docs/INPUT_MAMBO_COMPARISON.md)
 
 ## Credits
 

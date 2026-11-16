@@ -1,2 +1,2 @@
 #pragma once
-#define ICKZA_VERSION "2.0"
+#define HIRSCHGANGWARE_VERSION "2.0"

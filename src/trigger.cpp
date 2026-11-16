@@ -30,7 +30,7 @@ SOCKET gSock = INVALID_SOCKET;
 sockaddr_in gAddr{};
 bool gWsa = false;
 bool gCapture = false;
-ULONGLONG gCaptureAt = 0;
+bool gWaitForBoundRelease = false;
 bool gCaptureArmed = false;
 ULONGLONG gLastBindAt = 0;
 void (*gLog)(const char*) = nullptr;
@@ -66,7 +66,8 @@ bool gKeyHeld = false;
 int gKeyCode = 0;
 bool gHaveArmed = false;
 uint64_t gArmedId = 0;
-ULONGLONG gArmedAt = 0, gDownAt = 0, gUpAt = 0, gLastShot = 0;
+ULONGLONG gArmedAt = 0, gDownAt = 0, gLastShot = 0;
+ULONGLONG gOutputReleasedAt = 0;
 
 std::string exeDir() {
     char b[MAX_PATH] = {};
@@ -127,6 +128,19 @@ void setStatus(const std::string& s) {
     tlog("[trg] status: %s", s.c_str());
 }
 
+void bindKey(int key, int hid, InputSource source);
+
+bool boxInputEnabled() {
+    return gCfg.keySource == InputSource::Box ||
+           (gCfg.keySource == InputSource::Legacy && !gCfg.keyRemote && gCfg.keyFromDevice);
+}
+
+void captureBox(int key, int hid) {
+    if (gCapture && gCaptureArmed && gCfg.keyFromDevice && !remoteKeysReady() &&
+        ((key >= 1 && key <= 5) || dma_keyboard::validKey(unsigned(key))))
+        bindKey(key, hid, InputSource::Box);
+}
+
 // ---- input parsing (tolerant; raw lines are shown in the module window) ----
 void parseToken(const std::string& rawName, const std::string& rawVal) {
     const std::string name = lower(trim(rawName));
@@ -142,7 +156,7 @@ void parseToken(const std::string& rawName, const std::string& rawVal) {
     else if (name.find("right") != std::string::npos) btn = 2;
     if (btn) {
         gBtn[btn] = on;
-        if (gCapture && on && GetTickCount64() - gCaptureAt >= 320) { gCfg.key = btn; gCapture = false; gLive.note = "bound"; gLastBindAt = GetTickCount64(); }
+        if (on) captureBox(btn, 0);
         return;
     }
     if (name.find("key") != std::string::npos || name.find("vk") != std::string::npos) {
@@ -155,7 +169,7 @@ void parseToken(const std::string& rawName, const std::string& rawVal) {
         if (code > 0) {
             if (!val.empty()) gKeyHeld = on;
             gKeyCode = code;
-            if (gCapture && on && GetTickCount64() - gCaptureAt >= 320) { gCfg.key = code; gCapture = false; gLive.note = "bound"; gLastBindAt = GetTickCount64(); }
+            if (on) captureBox(code, 0);
         }
     }
 }
@@ -173,7 +187,6 @@ void parseLine(const std::string& line) {
         if (digits) {
             gKeyHeld = l != "0";
             gKeyCode = 0;
-            if (gCapture && gKeyHeld) gCapture = false;
             return;
         }
         parseToken(l, std::string());
@@ -213,9 +226,11 @@ int vkToHid(int vk) {
     return 0;
 }
 
-void bindKey(int vk, int hid) {
+void bindKey(int vk, int hid, InputSource source) {
     gCfg.key = vk;
     gCfg.keyHid = hid;
+    gCfg.keySource = source;
+    gWaitForBoundRelease = true;
     gCapture = false;
     gLive.note = "bound";
     gLastBindAt = GetTickCount64();
@@ -244,12 +259,12 @@ void handleFrame(uint8_t cmd, const uint8_t* pl, uint16_t len) {
         if (id > 4) return;
         const int b = id + 1;  // 0..4 -> codes 1..5 (left..mouse5)
         gBtn[b] = st == 1;
-        if (gCapture && st == 1 && GetTickCount64() - gCaptureAt >= 320) bindKey(b, 0);
+        if (st == 1) captureBox(b, 0);
         tlog("[trg] box button %d %s", b, st ? "down" : "up");
     } else if (kind == 2) {
         gKeyHid = id;
         gKeyHeld = st == 1;
-        if (gCapture && st == 1 && GetTickCount64() - gCaptureAt >= 320) bindKey(hidToVk(id), id);
+        if (st == 1) captureBox(hidToVk(id), id);
         tlog("[trg] box key hid 0x%02X %s", id, st ? "down" : "up");
     }
 }
@@ -266,10 +281,10 @@ void maskReport(uint8_t m) {
         gLastMask = m;
         tlog("[trg] box buttons mask 0x%02X", m);
     }
-    if (gCapture && GetTickCount64() - gCaptureAt >= 320) {
+    if (gCapture && gCaptureArmed) {
         for (int i = 0; i < 5; ++i)
             if ((m >> i) & 1) {
-                bindKey(b[i], 0);
+                captureBox(b[i], 0);
                 break;
             }
     }
@@ -595,6 +610,11 @@ void load() {
         else if (k == "playersonly") gCfg.playersOnly = toBool(v, gCfg.playersOnly);
         else if (k == "animals") gCfg.animals = toBool(v, gCfg.animals);
         else if (k == "key") gCfg.key = toInt(v, gCfg.key);
+        else if (k == "keysource") {
+            if (v == "main") gCfg.keySource = InputSource::MainPc;
+            else if (v == "second") gCfg.keySource = InputSource::SecondPc;
+            else if (v == "box") gCfg.keySource = InputSource::Box;
+        }
         else if (k == "keyfromdevice") gCfg.keyFromDevice = toBool(v, gCfg.keyFromDevice);
         else if (k == "keyfromlocal") gCfg.keyFromLocal = toBool(v, gCfg.keyFromLocal);
         else if (k == "keyremote") gCfg.keyRemote = toBool(v, gCfg.keyRemote);
@@ -632,12 +652,18 @@ void load() {
 void save() {
     std::ofstream f(iniPath(), std::ios::trunc);
     if (!f) return;
-    f << "# Ickza triggerbot - pure mouse box (KMBox / MAKCU / similar). Copy this file PC to PC.\n";
+    f << "# HirschgangWare triggerbot - pure mouse box (KMBox / MAKCU / similar). Copy this file PC to PC.\n";
     f << "[Triggerbot]\n";
     f << "enabled=" << (gCfg.enabled ? 1 : 0) << "\n";
     f << "playersOnly=" << (gCfg.playersOnly ? 1 : 0) << "\n";
     f << "animals=" << (gCfg.animals ? 1 : 0) << "\n";
     f << "key=" << gCfg.key << "\n";
+    switch (gCfg.keySource) {
+        case InputSource::MainPc: f << "keySource=main\n"; break;
+        case InputSource::SecondPc: f << "keySource=second\n"; break;
+        case InputSource::Box: f << "keySource=box\n"; break;
+        case InputSource::Legacy: break;
+    }
     f << "keyFromDevice=" << (gCfg.keyFromDevice ? 1 : 0) << "\n";
     f << "keyFromLocal=" << (gCfg.keyFromLocal ? 1 : 0) << "\n";
     f << "keyRemote=" << (gCfg.keyRemote ? 1 : 0) << "\n";
@@ -667,11 +693,15 @@ void save() {
     f << "showDebug=" << (gCfg.showDebug ? 1 : 0) << "\n";
 }
 
+int keyToVk(int key) {
+    constexpr int buttons[]{0, VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2};
+    if (key >= 1 && key <= 5) return buttons[key];
+    return dma_keyboard::validKey(unsigned(key)) ? key : 0;
+}
+
 bool localKeyDown(int key) {
-    int vk = key;
-    if (key >= 1 && key <= 5)
-        vk = key == 1 ? VK_LBUTTON : key == 2 ? VK_RBUTTON : key == 3 ? VK_MBUTTON : key == 4 ? VK_XBUTTON1 : VK_XBUTTON2;
-    return (GetAsyncKeyState(vk) & 0x8000) != 0;
+    const int vk = keyToVk(key);
+    return vk && (GetAsyncKeyState(vk) & 0x8000) != 0;
 }
 
 bool deviceKeyDown(int key) {
@@ -681,49 +711,7 @@ bool deviceKeyDown(int key) {
 }
 
 void pollKey() {
-    if (!gCfg.cmdKeyPoll.empty() && gCfg.keyFromDevice) deviceSend(gCfg.cmdKeyPoll, gCfg.key);
-}
-
-int scanLocalBind() {
-    if (GetAsyncKeyState(VK_LBUTTON) & 0x8000) return 1;
-    if (GetAsyncKeyState(VK_RBUTTON) & 0x8000) return 2;
-    if (GetAsyncKeyState(VK_MBUTTON) & 0x8000) return 3;
-    if (GetAsyncKeyState(VK_XBUTTON1) & 0x8000) return 4;
-    if (GetAsyncKeyState(VK_XBUTTON2) & 0x8000) return 5;
-    for (int vk = 0x08; vk <= 0xFE; ++vk) {
-        if (vk <= 0x06) continue;
-        if (GetAsyncKeyState(vk) & 0x8000) return vk;
-    }
-    return 0;
-}
-
-// forward decls for the DMA key path (defined further below, used by the bind capture)
-extern bool (*gRemoteKeys)(uint8_t*);
-extern uint8_t gRemoteNow[256];
-extern uint8_t gRemotePrev[256];
-bool remoteDown(int vk);
-
-// bind capture: works from the box AND from this PC's own keyboard/mouse
-void captureTick() {
-    if (!gCapture) return;
-    const int lk = scanLocalBind();
-    if (!gCaptureArmed) {
-        if (lk == 0) gCaptureArmed = true;
-        return;
-    }
-    if (lk) {
-        bindKey(lk, vkToHid(lk));
-        return;
-    }
-    if (gCfg.keyRemote && gRemoteKeys) {
-        for (int vk = 0x08; vk <= 0xFE; ++vk) {
-            if (vk <= 0x06) continue;
-            if ((gRemoteNow[vk] & 0x80) && !(gRemotePrev[vk] & 0x80)) {
-                bindKey(vk, vkToHid(vk));
-                return;
-            }
-        }
-    }
+    if (boxInputEnabled() && !gCfg.cmdKeyPoll.empty()) deviceSend(gCfg.cmdKeyPoll, gCfg.key);
 }
 
 Config& cfg() { return gCfg; }
@@ -759,9 +747,8 @@ void monitorPreset(int i) {
 bool justBound() { return gLastBindAt != 0 && GetTickCount64() - gLastBindAt < 450; }
 void startCapture() {
     gCapture = true;
-    gCaptureAt = GetTickCount64();
     gCaptureArmed = false;
-    gLive.note = "press the key on the gaming PC or on this PC";
+    gLive.note = "press a key or mouse button on either PC";
 }
 void stopCapture() { gCapture = false; gLive.note.clear(); }
 void touch() { gDirty = true; gDirtyAt = GetTickCount64(); }
@@ -779,31 +766,119 @@ void probeInput() {
 bool probing() { return gProbeIdx >= 0; }
 int baudUsed() { return int(gBaudUsed); }
 
-// ---- keys typed on the gaming PC, read straight from its key state over DMA ----
-bool (*gRemoteKeys)(uint8_t*) = nullptr;
-uint8_t gRemoteNow[256] = {};
-uint8_t gRemotePrev[256] = {};
-ULONGLONG gRemoteAt = 0;
-bool gRemoteOk = false;
+namespace {
 
-void setRemoteKeys(bool (*fn)(uint8_t*)) { gRemoteKeys = fn; }
-bool remoteKeysReady() { return gRemoteOk; }
-void (*gKeyScan)() = nullptr;
-void setKeyScan(void (*fn)()) { gKeyScan = fn; }
-void keyScanNow() {
-    if (gKeyScan) gKeyScan();
+dma_keyboard::Sample (*gRemoteKeys)() = nullptr;
+dma_keyboard::Sample gRemote;
+dma_keyboard::Bitmap gRemoteInitiallyDown;
+ULONGLONG gRemoteAt = 0;
+
+bool usesRemote() {
+    return gCfg.keySource == InputSource::MainPc ||
+           (gCfg.keySource == InputSource::Legacy && gCfg.keyRemote);
 }
 
-void remoteTick() {
-    if (!gRemoteKeys || !gCfg.keyRemote) return;
-    const ULONGLONG now = GetTickCount64();
+bool remoteDown(int key) {
+    const int vk = keyToVk(key);
+    return gRemote.pid && vk && dma_keyboard::down(gRemote.bits, unsigned(vk));
+}
+
+bool remoteInitiallyDown(int key) {
+    const int vk = keyToVk(key);
+    return vk && dma_keyboard::down(gRemoteInitiallyDown, unsigned(vk));
+}
+
+void sampleRemote(ULONGLONG now) {
+    if (!gRemoteKeys || (!gCapture && !usesRemote())) {
+        gRemote = {};
+        gRemoteAt = 0;
+        return;
+    }
     if (gRemoteAt && now - gRemoteAt < 8) return;
     gRemoteAt = now;
-    std::memcpy(gRemotePrev, gRemoteNow, sizeof gRemoteNow);
-    gRemoteOk = gRemoteKeys(gRemoteNow);
+    const auto current = gRemoteKeys();
+    if (current.pid != gRemote.pid) {
+        gRemoteInitiallyDown = current.bits;
+        tlog("[trg] PCIe keyboard %s", current.pid ? "connected" : "disconnected");
+    } else {
+        for (size_t i = 0; i < current.bits.size(); ++i)
+            gRemoteInitiallyDown[i] &= current.bits[i];
+    }
+    gRemote = current;
 }
 
-bool remoteDown(int vk) { return gRemoteOk && vk > 0 && vk < 256 && (gRemoteNow[vk] & 0x80) != 0; }
+template<class IsDown>
+int firstBinding(IsDown down) {
+    for (int key = 1; key < 255; ++key) {
+        if (key == VK_SHIFT || key == VK_CONTROL || key == VK_MENU || !keyToVk(key)) continue;
+        if (down(key)) return key;
+    }
+    return 0;
+}
+
+bool captureInputs() {
+    if (!gCapture) return false;
+    const int local = firstBinding(localKeyDown);
+    if (!gCaptureArmed) {
+        const int remote = firstBinding(remoteDown);
+        const bool boxHeld = connected() && gCfg.keyFromDevice && !gRemote.pid &&
+            (gKeyHeld || std::any_of(std::begin(gBtn) + 1, std::end(gBtn), [](bool held) { return held; }));
+        gCaptureArmed = !local && !remote && !boxHeld;
+    } else if (local) {
+        bindKey(local, vkToHid(local), InputSource::SecondPc);
+    } else {
+        const int remote = firstBinding([](int key) {
+            return remoteDown(key) && !remoteInitiallyDown(key);
+        });
+        if (remote) bindKey(remote, vkToHid(remote), InputSource::MainPc);
+    }
+    return true;
+}
+
+bool remoteMouseSettling(ULONGLONG now) {
+    return usesRemote() && gCfg.key >= 1 && gCfg.key <= 5 &&
+           (gDownAt || (gOutputReleasedAt && now - gOutputReleasedAt < 40));
+}
+
+bool boundDown() {
+    if (usesRemote()) return remoteDown(gCfg.key) && !remoteInitiallyDown(gCfg.key);
+    if (gCfg.keySource == InputSource::SecondPc) return localKeyDown(gCfg.key);
+    return (gCfg.keySource == InputSource::Legacy && gCfg.keyFromLocal && localKeyDown(gCfg.key)) ||
+           (connected() && boxInputEnabled() && deviceKeyDown(gCfg.key));
+}
+
+}  // namespace
+
+void setRemoteKeys(dma_keyboard::Sample (*fn)()) { gRemoteKeys = fn; }
+
+void pollInputs() {
+    const ULONGLONG now = GetTickCount64();
+    const bool settling = remoteMouseSettling(now);
+    if (!settling) sampleRemote(now);
+    if (captureInputs()) {
+        gLive.keyHeld = false;
+        return;
+    }
+    const bool held = settling ? gRemote.pid && gLive.keyHeld : boundDown();
+    if (gWaitForBoundRelease && !held) gWaitForBoundRelease = false;
+    const bool activated = held && !gWaitForBoundRelease;
+    if (activated && !gLive.keyHeld) {
+        ++gLive.keyPresses;
+        tlog("[trg] %s key=%d total=%llu", keySourceLabel(), gCfg.key,
+             static_cast<unsigned long long>(gLive.keyPresses));
+    }
+    gLive.keyHeld = activated;
+}
+
+bool remoteKeysReady() { return gRemote.pid != 0; }
+
+const char* keySourceLabel() {
+    if (usesRemote()) return "Main PC";
+    if (gCfg.keySource == InputSource::SecondPc) return "Second PC";
+    if (gCfg.keySource == InputSource::Box) return "Box";
+    return "Local / box";
+}
+
 void clickOnce() {
     if (!connected()) return;
     deviceSend(gCfg.cmdDown);
@@ -825,16 +900,13 @@ const char* boneName(int i) {
 
 void update(const std::vector<Cand>& cands, float cx, float cy) {
     const ULONGLONG now = GetTickCount64();
-    captureTick();
     probeStep();
-    remoteTick();
     if (gDirty && now - gDirtyAt > 600) {
         gDirty = false;
         save();
     }
     if (!connected()) {
         gLive.target = false;
-        gLive.keyHeld = false;
         if (gCfg.autoConnect && now - gLastRetry > 1500) {
             gLastRetry = now;
             openDevice();
@@ -852,13 +924,10 @@ void update(const std::vector<Cand>& cands, float cx, float cy) {
     }
     if (!probing() && gCfg.useBinary && !gCfg.modeNet && (gStreamLost || now - gLastStreamOn > 10000)) sendStreams();
 
-    const bool held = (gCfg.keyFromDevice && deviceKeyDown(gCfg.key)) || (gCfg.keyFromLocal && localKeyDown(gCfg.key)) ||
-                      (gCfg.keyRemote && remoteDown(gCfg.key));
-    gLive.keyHeld = held;
-
     if (gDownAt && now - gDownAt >= (ULONGLONG)std::max(2, gCfg.clickMs)) {
         deviceSend(gCfg.cmdUp);
         gDownAt = 0;
+        gOutputReleasedAt = now;
     }
 
     const float rad = float(std::max(1, gCfg.radiusPx));
@@ -899,7 +968,7 @@ void update(const std::vector<Cand>& cands, float cx, float cy) {
         gArmedAt = now;
     }
     gLive.heldMs = int(now - gArmedAt);
-    if (!held || gDownAt) return;
+    if (!gLive.keyHeld || gDownAt || remoteMouseSettling(now)) return;
     if (now - gArmedAt < (ULONGLONG)gCfg.delayMs) return;
     if (gLastShot && now - gLastShot < (ULONGLONG)std::max(1, gCfg.refireMs)) return;
     deviceSend(gCfg.cmdDown);

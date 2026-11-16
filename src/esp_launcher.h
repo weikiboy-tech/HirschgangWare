@@ -22,13 +22,13 @@ struct EspSettings {
     int dzRange = 1000;
     bool dzLoot = false;
     int dzLootRange = 150;
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
     bool dzBoneIds = false;
 #endif
     bool dzAnimals = false, dzVehicles = true;
     bool dzLootValuables = false;
     bool dzHeld = true;
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
     std::string dzNameAnchor;
 #endif
     bool dzRadar = false;

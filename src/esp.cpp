@@ -28,7 +28,7 @@
 #include <vector>
 
 #include "clock.h"
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
 #include "discover.h"
 #endif
 #include "gpu_canvas.h"
@@ -127,7 +127,7 @@ HWND gOverlay = nullptr, gGame = nullptr;
 RECT gView{};
 std::vector<Box> gBoxes;
 int gFps = 0;
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
 std::atomic<double> gReadAvgMs{0}, gReadMaxMs{0};
 double gPaintMs = 0;
 std::atomic<double> gDzCamMs{0};
@@ -203,7 +203,7 @@ struct DzSnap {
     std::shared_ptr<const std::vector<std::string>> online;
     size_t slots = 0, targets = 0, lootSlots = 0;
     int dead = 0;
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
     std::vector<Vec3> dbgBones;
     int dbgKind = 0;
 #endif
@@ -221,7 +221,7 @@ std::thread gDzLootThread;
 void dzLootPass(uint64_t world);
 std::atomic<bool> gDzReadRun{false};
 std::atomic<bool> gDzGone{false};
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
 struct DbgBone {
     POINT pt;
     int idx;
@@ -249,7 +249,7 @@ struct DzRadar {
 } gDzRadar;
 std::vector<LootPt> gDzLootPts;
 
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
 void logLine(const char* fmt, ...) {
     char line[1024];
     va_list ap;
@@ -268,7 +268,7 @@ void openLog() {
     char path[MAX_PATH];
     GetModuleFileNameA(nullptr, path, MAX_PATH);
     std::string p = path;
-    p = p.substr(0, p.find_last_of("\\/") + 1) + "Ickza.log";
+    p = p.substr(0, p.find_last_of("\\/") + 1) + "HirschgangWare.log";
     gLog = _fsopen(p.c_str(), "w", _SH_DENYNO);
     if (!gLog) std::printf("[!] could not write %s\n", p.c_str());
 }
@@ -403,7 +403,7 @@ bool updateFrame(const char*& stage, int& count);
 
 bool update() {
     static ULONGLONG lastAliveCheck = 0;
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
     static ULONGLONG lastStatus = 0;
     static const char* lastStage = "";
     static int frames = 0;
@@ -433,16 +433,16 @@ bool update() {
     }
     const char* stage = "";
     int count = 0;
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
     static LARGE_INTEGER freq{};
     if (!freq.QuadPart) QueryPerformanceFrequency(&freq);
     LARGE_INTEGER t0, t1;
 #endif
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
     QueryPerformanceCounter(&t0);
 #endif
     updateFrame(stage, count);
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
     QueryPerformanceCounter(&t1);
     ++frames;
     {
@@ -457,7 +457,7 @@ bool update() {
     static ULONGLONG lastFps = now;
     static int fpsFrames = 0;
     ++fpsFrames;
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
     static double readSum = 0, readMax = 0;
     const double readMs = double(t1.QuadPart - t0.QuadPart) * 1000.0 / double(freq.QuadPart);
     readSum += readMs;
@@ -465,7 +465,7 @@ bool update() {
 #endif
     if (now - lastFps >= 1000) {
         gFps = int(fpsFrames * 1000 / (now - lastFps));
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
         gReadAvgMs = readSum / fpsFrames;
         gReadMaxMs = readMax;
         readSum = readMax = 0;
@@ -474,7 +474,7 @@ bool update() {
         fpsFrames = 0;
     }
 
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
     if (std::strcmp(stage, lastStage) != 0) {
         logLine("[log] frame: %s", stage);
         lastStage = stage;
@@ -570,7 +570,7 @@ bool orthonormal(const float* r) {
 
 bool parseCam(const uint8_t* b, Cam& c) {
     static uint32_t basis = kCamBasis;
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
     static bool logged = false, warnedProj = false;
 #endif
     auto fits = [&](uint32_t o) { return o + 48 <= kCamBytes && orthonormal(reinterpret_cast<const float*>(b + o)); };
@@ -589,14 +589,14 @@ bool parseCam(const uint8_t* b, Cam& c) {
     std::memcpy(&c.px, b + kCamProjD1, 4);
     std::memcpy(&c.py, b + kCamProjD2 + 4, 4);
     if (!(c.px > 0.05f && c.px < 20 && c.py > 0.05f && c.py < 20)) {
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
         if (!warnedProj) logLine("[!] DayZ camera projection unreadable (%.3f, %.3f); assuming 90 deg 16:9", c.px, c.py);
         warnedProj = true;
 #endif
         c.px = 1;
         c.py = 9.f / 16;
     }
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
     if (!logged) {
         logLine("[log] DayZ camera: basis +0x%X, pos %.1f %.1f %.1f, tan(fov/2) %.3f x %.3f", basis, c.pos.x, c.pos.y, c.pos.z, c.px, c.py);
         logged = true;
@@ -888,7 +888,7 @@ void dzDetectMap(uint64_t world) {
 
     const std::string id = text.empty() ? std::string() : dzMapIdForWorld(text);
     if (id.empty()) return;
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
     static std::string lastText;
     if (text != lastText) {
         lastText = text;
@@ -990,7 +990,7 @@ void readBonesBatch(std::vector<BoneJob>& jobs, DzSnap& out) {
     }
 }
 
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
 void readBonesWorld(uint64_t entity, int kind, uint64_t vs, std::vector<Vec3>& out) {
     out.clear();
     const uint32_t skelOff = (kind == 1) ? dz::kSkelPlayer : dz::kSkelInfected;
@@ -998,7 +998,7 @@ void readBonesWorld(uint64_t entity, int kind, uint64_t vs, std::vector<Vec3>& o
     const bool okSkel = gProc->read(entity + skelOff, skeleton) && dz::heapPtr(skeleton);
     const bool okAnim = okSkel && gProc->read(skeleton + dz::kAnimClass, animClass) && dz::heapPtr(animClass);
     const bool okArr = okAnim && gProc->read(animClass + dz::kMatrixArray, matrixArray) && dz::heapPtr(matrixArray);
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
     static ULONGLONG lastChainLog = 0;
     const ULONGLONG t = GetTickCount64();
     if (t - lastChainLog >= 2000) {
@@ -1145,7 +1145,7 @@ void scanDayz(DzSnap& out, const char*& stage) {
         prune(gDzEntDead);
     }
 
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
     {
         constexpr ULONGLONG kArmDelayMs = 8000;
         size_t remotePlayers = 0;
@@ -1378,7 +1378,7 @@ void scanDayz(DzSnap& out, const char*& stage) {
         }
     }
 
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
     if (gSettings.dzBoneIds) {
         double best = 1e30;
         size_t bi = SIZE_MAX;
@@ -1467,18 +1467,18 @@ void scanDayz(DzSnap& out, const char*& stage) {
                 for (size_t k = 0; k < live.size(); ++k)
                     reqs.push_back({uintptr_t(dz::heapPtr(str[k]) ? str[k] + dz::kNameText : 0), &nb[k * kPName], kPName});
                 gProc->readMany(reqs);
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
                 size_t anon = SIZE_MAX;
 #endif
                 for (size_t k = 0; k < live.size(); ++k) {
                     const std::string nm = reqs[k].ok ? cleanName(&nb[k * kPName], kPName) : std::string();
                     if (!nm.empty() && nid[k]) fresh[nid[k]] = nm;
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
                     if (anon == SIZE_MAX && nm.rfind("Survivor", 0) == 0) anon = k;
 #endif
                 }
                 rosterRead = true;
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
                 static uint64_t probedWorld = 0;
                 if (probedWorld != world && !fresh.empty()) {
                     probedWorld = world;
@@ -1537,7 +1537,7 @@ void scanDayz(DzSnap& out, const char*& stage) {
             const auto nmIt = gDzRoster.find(idIt->second);
             if (nmIt != gDzRoster.end()) e.name = nmIt->second;
         }
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
         static ULONGLONG lastRosterLog = 0;
         if (now - lastRosterLog >= 10000) {
             lastRosterLog = now;
@@ -1610,7 +1610,7 @@ void scanDayz(DzSnap& out, const char*& stage) {
                 }
                 gDzEntHeld[whoPtr[k]] = nm;
             }
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
             static ULONGLONG lastHeldLog = 0;
             if (now - lastHeldLog >= 5000) {
                 lastHeldLog = now;
@@ -1652,7 +1652,7 @@ void scanDayz(DzSnap& out, const char*& stage) {
                 if (!nm.empty()) gDzMeName = nm;
             }
         }
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
         const int hop = !dz::heapPtr(a) ? 0 : !dz::heapPtr(b) ? 1 : !dz::heapPtr(c) ? 2 : !dz::heapPtr(slot) ? 3 : gDzMeName.empty() ? 4 : 5;
         static int lastHop = -1;
         static std::string lastName;
@@ -1709,7 +1709,7 @@ void dzLootPass(uint64_t world) {
         std::vector<Process::ReadReq> lreq = {{uintptr_t(world + dz::kLoot), hdr, 24}};
         gProc->readMany(lreq);
         const uint64_t lbuf = hdr[0], alloc = hdr[1] & 0xFFFFFFFF, lvalid = hdr[2] & 0xFFFFFFFF;
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
         {
             static uint64_t lastHdr[3] = {};
             if (lreq[0].ok && std::memcmp(lastHdr, hdr, sizeof hdr) != 0) {
@@ -1728,7 +1728,7 @@ void dzLootPass(uint64_t world) {
                 gProc->readMany(lreq);
                 if (lreq[0].ok) {
                     stride = dzLootLayout(probe.data(), probe.size());
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
                     static uint32_t logged = 0;
                     if (stride != logged)
                         logLine("[loot] item table: %s entries, alloc %llu, valid %llu",
@@ -1762,7 +1762,7 @@ void dzLootPass(uint64_t world) {
                 slotsOk = lreq[0].ok;
             }
         }
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
         if (slotsOk) {
             static std::unordered_set<uint64_t> prevSlots;
             std::unordered_set<uint64_t> cur;
@@ -1972,10 +1972,10 @@ void dzCamLoop() {
             }
         }
         tel::time(tel::T_CAM, t1 - t0);
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
         gDzCamMs = gDzCamMs.load() * 0.98 + double(t1 - t0) / 1000.0 * 0.02;
 #endif
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
         {
             static uint64_t winStart = 0, lastPtr = 0;
             static int changes = 0, jumps = 0, ptrSwaps = 0;
@@ -2194,7 +2194,7 @@ bool updateDayz(const char*& stage, int& count) {
 
 void stopEsp();
 
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
 void runDiscoverSweep(const std::string& nameArg) {
     if (!gProc) { logLine("[!] name discovery: no target process"); return; }
     tel::Suppress noStats;
@@ -2235,7 +2235,7 @@ void runDiscoverSweep(const std::string& nameArg) {
         findScoreboard(*gProc, img, cfg, anchor, sink);
         findMyName(*gProc, img, cfg, anchor, sink);
     } else {
-        logLine("[!] name discovery: no anchor name (own-name chain empty, none supplied) - set dz_name_anchor=<gamertag> in Ickza.ini; skipped the name-anchored finders");
+        logLine("[!] name discovery: no anchor name (own-name chain empty, none supplied) - set dz_name_anchor=<gamertag> in HirschgangWare.ini; skipped the name-anchored finders");
     }
     logLine("[*] name discovery: sweep done - results above are tagged [dump]");
 }
@@ -2247,7 +2247,7 @@ void dzReadLoop() {
     ULONGLONG lastSpeed = lastAlive;
     constexpr ULONGLONG kSpeedMs = 30000;
     int miss = 0;
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
     LARGE_INTEGER qpf;
     QueryPerformanceFrequency(&qpf);
     ULONGLONG lastStat = lastAlive;
@@ -2256,7 +2256,7 @@ void dzReadLoop() {
 #endif
     speed::quick(*gProc);
     logLine("[log] DMA speed test: %.1f MB/s", speed::gLinkMBps.load());
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
     ULONGLONG lastLog = 0;
     const char* lastStage = "";
 #endif
@@ -2275,10 +2275,10 @@ void dzReadLoop() {
             lastSpeed = t;
             speed::quick(*gProc, 1);
         }
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
         { std::string dn; if (tel::discoverRequested(dn)) runDiscoverSweep(dn); }
 #endif
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
         LARGE_INTEGER a, b;
         QueryPerformanceCounter(&a);
 #endif
@@ -2286,7 +2286,7 @@ void dzReadLoop() {
         const char* stage = "";
         scanDayz(s, stage);
         gProc->maintain();
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
         QueryPerformanceCounter(&b);
         const double ms = double(b.QuadPart - a.QuadPart) * 1000.0 / double(qpf.QuadPart);
         sum += ms;
@@ -2310,7 +2310,7 @@ void dzReadLoop() {
             std::lock_guard<std::mutex> lk(gDzSnapMx);
             gDzSnap = std::move(s);
         }
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
         if (t - lastStat >= 1000) {
             gReadAvgMs = sum / std::max(1, n);
             gReadMaxMs = mx;
@@ -2416,13 +2416,6 @@ bool drawDayzFrame() {
                 }
             }
             trigger::update(trigCands, ccx, ccy);
-            static bool loggedDmaKeys = false;
-            if (!loggedDmaKeys) {
-                loggedDmaKeys = true;
-                uint8_t kb[256] = {};
-                const bool okk = gProc && gProc->keyState(kb);
-                logLine("[trg] dma key state: %s (%s)", okk ? "ready" : "unavailable", gProc ? gProc->keyInfo().c_str() : "-");
-            }
             static std::string lastRxSeen;
             if (trigger::cfg().showDebug && trigger::live().lastRx != lastRxSeen) {
                 lastRxSeen = trigger::live().lastRx;
@@ -2430,7 +2423,7 @@ bool drawDayzFrame() {
             }
         }
 
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
         gDzDbgBones.clear();
         if (gSettings.dzBoneIds && !snap.dbgBones.empty()) {
             const float w = float(gView.right - gView.left), h = float(gView.bottom - gView.top);
@@ -2470,7 +2463,7 @@ bool drawDayzFrame() {
         frames = 0;
         lastFps = now;
     }
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
     static ULONGLONG lastRlog = lastFps;
     if (now - lastRlog >= 2000) {
         logLine("[log] render: %d fps, cam %.2f ms, paint %.2f ms, %d boxes", gFps, gDzCamMs.load(), gPaintMs, int(gBoxes.size()));
@@ -2866,7 +2859,7 @@ void drawScene(Canvas& cv) {
 
     if (gDzRadar.ok && gSettings.dzRadar) drawDzRadar(cv);
 
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
     if (gSettings.dzBoneIds && !gDzDbgBones.empty()) {
         cv.pen(RGB(0, 255, 255), 1);
         for (const auto& b : gDzDbgBones) {
@@ -3009,7 +3002,7 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
         case WM_CLOSE: stopEsp(); return 0;
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
         case WM_DISPLAYCHANGE: logLine("[log] display change: %ux%u", LOWORD(lp), HIWORD(lp)); break;
         case WM_DPICHANGED: logLine("[log] window moved to a monitor with dpi %u", LOWORD(wp)); break;
 #endif
@@ -3030,7 +3023,7 @@ void flushSettings(bool now = false) {
 
 void destroyRadarScreen() { radar::destroy(); }
 
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
 const bool gRadarLogWired = [] {
     radar::setLog([](const char* s) { logLine("%s", s); });
     mapdl::setLog([](const char* s) { logLine("%s", s); });
@@ -3284,7 +3277,7 @@ void runFrame() {
         hadMinimap = gSettings.dzRadar;
         mapWas = gSettings.dzMap;
     }
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
     LARGE_INTEGER f, t0, t1;
     QueryPerformanceFrequency(&f);
     QueryPerformanceCounter(&t0);
@@ -3305,7 +3298,7 @@ void runFrame() {
         ReleaseDC(gOverlay, hdc);
     }
     ValidateRect(gOverlay, nullptr);
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
     QueryPerformanceCounter(&t1);
 #endif
     if (gGpu) {
@@ -3319,7 +3312,7 @@ void runFrame() {
             logLine(gGpu ? "[!] GPU renderer lost; recreated" : "[!] GPU renderer lost; using GDI (%s)", err.c_str());
         }
     }
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
     const double paintMs = double(t1.QuadPart - t0.QuadPart) * 1000.0 / double(f.QuadPart);
     gPaintMs = gPaintMs * 0.9 + paintMs * 0.1;
     tel::time(tel::T_PAINT, uint64_t(paintMs * 1000.0));
@@ -3341,25 +3334,25 @@ bool createOverlay() {
         WNDCLASSA wc{};
         wc.lpfnWndProc = wndProc;
         wc.hInstance = inst;
-        wc.lpszClassName = "ickza_fullscreen";
+        wc.lpszClassName = "hirschgangware_fullscreen";
         RegisterClassA(&wc);
         wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-        wc.lpszClassName = "ickza_overlay";
+        wc.lpszClassName = "hirschgangware_overlay";
         RegisterClassA(&wc);
         registered = true;
     }
     if (gFull) {
-        gOverlay = CreateWindowExA(WS_EX_TOPMOST, "ickza_fullscreen", "Ickza - DMA view (END quits)", WS_POPUP | WS_VISIBLE, gScreen.left,
+        gOverlay = CreateWindowExA(WS_EX_TOPMOST, "hirschgangware_fullscreen", "HirschgangWare - DMA view (END quits)", WS_POPUP | WS_VISIBLE, gScreen.left,
                                    gScreen.top, gScreen.right - gScreen.left, gScreen.bottom - gScreen.top, nullptr, nullptr, inst, nullptr);
         if (gOverlay)
             SetWindowPos(gOverlay, HWND_TOPMOST, gScreen.left, gScreen.top, gScreen.right - gScreen.left, gScreen.bottom - gScreen.top,
                          SWP_NOACTIVATE);
     } else if (gDma) {
-        gOverlay = CreateWindowExA(0, "ickza_overlay", "Ickza - DMA view (END quits)", WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT,
+        gOverlay = CreateWindowExA(0, "hirschgangware_overlay", "HirschgangWare - DMA view (END quits)", WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT,
                                    CW_USEDEFAULT, 1280, 760, nullptr, nullptr, inst, nullptr);
     } else {
-        gOverlay = CreateWindowExA(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, "ickza_overlay",
-                                   "Ickza", WS_POPUP, 0, 0, 1, 1, nullptr, nullptr, inst, nullptr);
+        gOverlay = CreateWindowExA(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, "hirschgangware_overlay",
+                                   "HirschgangWare", WS_POPUP, 0, 0, 1, 1, nullptr, nullptr, inst, nullptr);
         if (gOverlay) SetLayeredWindowAttributes(gOverlay, kKey, 0, LWA_COLORKEY);
     }
     if (!gOverlay) {
@@ -3376,18 +3369,18 @@ bool createOverlay() {
     return true;
 }
 
-void startEsp() {
+void startEsp(bool recovering = false) {
     if (gRun != Run::Idle) return;
     gDma = gSettings.dma;
     gFull = gDma && gSettings.fullscreen;
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
     const EspSettings& o = gSettings;
     logLine("[log] start: %s%s, draw: skeleton=%d box=%d names=%d info=%d fps=%d", gDma ? "DMA" : "this PC", gFull ? " fullscreen" : "",
             o.skeleton, o.box, o.names, o.info, o.fps);
 #endif
     if (gFull) {
         const auto displays = listDisplays();
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
         for (const auto& d : displays) {
             DEVMODEA dm{};
             dm.dmSize = sizeof dm;
@@ -3403,7 +3396,7 @@ void startEsp() {
         }
         gScreen = pick->rc;
         logLine("[+] fullscreen on display %d (%ldx%ld)", pick->number, pick->width(), pick->height());
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
         DEVMODEA pdm{};
         pdm.dmSize = sizeof pdm;
         if (EnumDisplaySettingsA(pick->device.c_str(), ENUM_CURRENT_SETTINGS, &pdm)) {
@@ -3428,23 +3421,29 @@ void startEsp() {
     auto cancel = gCancel = std::make_shared<std::atomic<bool>>(false);
     logLine(gDma ? "[*] waiting for DayZ_x64.exe on the target PC over DMA (offline mode, spawned in)"
                  : "[*] waiting for DayZ_x64.exe (offline mode, spawned in)");
-    std::thread([gen, cancel, dma = gDma, device = gSettings.device, dmaDir = gSettings.dmaDir, ctl = gCtl] {
+    std::thread([gen, cancel, recovering, dma = gDma, device = gSettings.device, dmaDir = gSettings.dmaDir, ctl = gCtl] {
         auto res = std::make_unique<AttachResult>();
         res->gen = gen;
         res->proc = dma ? makeDmaProcess(device, dmaDir, true) : makeLocalProcess();
         std::string err;
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
         std::string lastErr;
 #endif
         while (!res->proc->attach(kGameExe, err)) {
             if (*cancel) return;
+            if (recovering && err.rfind("fatal: MemProcFS init failed", 0) == 0) {
+                res->proc = makeDmaProcess(device, dmaDir, true);
+                Sleep(1000);
+                if (*cancel) return;
+                continue;
+            }
             if (err.rfind("fatal:", 0) == 0) {
                 res->err = err.substr(7);
                 res->proc.reset();
                 PostMessage(ctl, WM_ATTACHED, 0, reinterpret_cast<LPARAM>(res.release()));
                 return;
             }
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
             if (dma && err != lastErr) logLine("[*] %s", (lastErr = err).c_str());
 #endif
             Sleep(500);
@@ -3487,7 +3486,7 @@ LRESULT CALLBACK ctlProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (!r->proc) {
             logLine("[-] %s", r->err.c_str());
             stopEsp();
-            MessageBoxA(gPanel, r->err.c_str(), "Ickza", MB_OK | MB_ICONERROR);
+            MessageBoxA(gPanel, r->err.c_str(), "HirschgangWare", MB_OK | MB_ICONERROR);
             return 0;
         }
         gProc = std::move(r->proc);
@@ -3511,7 +3510,7 @@ LRESULT CALLBACK ctlProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     return DefWindowProcA(hwnd, msg, wp, lp);
 }
 
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
 std::string exeDir0() {
     char self[MAX_PATH];
     GetModuleFileNameA(nullptr, self, MAX_PATH);
@@ -3523,7 +3522,7 @@ bool updatePending() {
     const ULONGLONG now = GetTickCount64();
     if (now - last < 1000) return false;
     last = now;
-    const std::string pending = exeDir0() + "\\Ickza_pending.exe";
+    const std::string pending = exeDir0() + "\\HirschgangWare_pending.exe";
     if (GetFileAttributesA(pending.c_str()) == INVALID_FILE_ATTRIBUTES) return false;
     const HANDLE h = CreateFileA(pending.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr);
     if (h == INVALID_HANDLE_VALUE) return false;
@@ -3536,7 +3535,7 @@ int swapAndRelaunch() {
     char selfBuf[MAX_PATH];
     GetModuleFileNameA(nullptr, selfBuf, MAX_PATH);
     const std::string self = selfBuf, dir = exeDir0();
-    const std::string old = dir + "\\Ickza_old.exe", pending = dir + "\\Ickza_pending.exe";
+    const std::string old = dir + "\\HirschgangWare_old.exe", pending = dir + "\\HirschgangWare_pending.exe";
     const auto moveRetry = [](const std::string& from, const std::string& to) {
         for (int i = 0; i < 40; ++i) {
             if (MoveFileExA(from.c_str(), to.c_str(), MOVEFILE_REPLACE_EXISTING)) return true;
@@ -3548,7 +3547,7 @@ int swapAndRelaunch() {
         if (moveRetry(pending, self)) {
             logLine("[log] swapped in the new build");
         } else {
-            logLine("[!] update: could not move Ickza_pending.exe into place (error %lu) - restarting the old build",
+            logLine("[!] update: could not move HirschgangWare_pending.exe into place (error %lu) - restarting the old build",
                     GetLastError());
             moveRetry(old, self);
         }
@@ -3603,15 +3602,15 @@ int main(int argc, char** argv) {
             if (sscanf_s(v, "%ldx%ld", &wantW, &wantH) != 2) monitor = std::atoi(v);
         } else {
             MessageBoxA(nullptr,
-                "Ickza [--local | --dma] [--device fpga] [--dma-dir dir] [--fullscreen]\n"
+                "HirschgangWare [--local | --dma] [--device fpga] [--dma-dir dir] [--fullscreen]\n"
                 "      [--monitor n|WxH] [--gdi] [--loot] [--radar] [--map name]\n"
                 "no args = just the panel",
-                "Ickza", a == "-h" || a == "--help" ? MB_OK | MB_ICONINFORMATION : MB_OK | MB_ICONERROR);
+                "HirschgangWare", a == "-h" || a == "--help" ? MB_OK | MB_ICONINFORMATION : MB_OK | MB_ICONERROR);
             return a == "-h" || a == "--help" ? 0 : 2;
         }
     }
     if (autoStart && gSettings.fullscreen && !gSettings.dma) {
-        MessageBoxA(nullptr, "--fullscreen only applies with --dma", "Ickza", MB_OK | MB_ICONERROR);
+        MessageBoxA(nullptr, "--fullscreen only applies with --dma", "HirschgangWare", MB_OK | MB_ICONERROR);
         return 2;
     }
     if (monitor || wantW) {
@@ -3623,7 +3622,7 @@ int main(int argc, char** argv) {
             char msg[96];
             if (wantW) std::snprintf(msg, sizeof msg, "No display is %ldx%ld.", wantW, wantH);
             else std::snprintf(msg, sizeof msg, "No display %d.", monitor);
-            MessageBoxA(nullptr, msg, "Ickza", MB_OK | MB_ICONERROR);
+            MessageBoxA(nullptr, msg, "HirschgangWare", MB_OK | MB_ICONERROR);
             return 2;
         }
         gSettings.displayDevice = pick->device;
@@ -3631,19 +3630,17 @@ int main(int argc, char** argv) {
         gSettings.displayH = pick->height();
     }
 
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
     openLog();
     trigger::setLog([](const char* s) { logLine("%s", s); });
-    trigger::setRemoteKeys([](uint8_t* o) { return gProc ? gProc->keyState(o) : false; });
-    trigger::setKeyScan([] { if (gProc) gProc->keyScan(); });
-    setDmaKeyLog([](const char* s) { logLine("%s", s); });
+    trigger::setRemoteKeys([] { return gProc ? gProc->remoteKeySample() : dma_keyboard::Sample{}; });
     installCrashHandlers();
-    DeleteFileA((exeDir0() + "\\Ickza_old.exe").c_str());
+    DeleteFileA((exeDir0() + "\\HirschgangWare_old.exe").c_str());
 #endif
     const bool fineTimer = timeBeginPeriod(1) == TIMERR_NOERROR;
     std::string args;
     for (int i = 1; i < argc; ++i) args += std::string(" ") + argv[i];
-    logLine("[log] Ickza " ICKZA_VERSION " started:%s (per-monitor dpi %s)", autoStart ? args.c_str() : " (panel)", perMonitorDpi ? "on" : "unavailable");
+    logLine("[log] HirschgangWare " HIRSCHGANGWARE_VERSION " started:%s (per-monitor dpi %s)", autoStart ? args.c_str() : " (panel)", perMonitorDpi ? "on" : "unavailable");
 
     tel::start([](const char* l) { logLine("%s", l); });
 
@@ -3655,7 +3652,7 @@ int main(int argc, char** argv) {
     WNDCLASSA cc{};
     cc.lpfnWndProc = ctlProc;
     cc.hInstance = GetModuleHandleA(nullptr);
-    cc.lpszClassName = "ickza_ctl";
+    cc.lpszClassName = "hirschgangware_ctl";
     RegisterClassA(&cc);
     gCtl = CreateWindowExA(0, cc.lpszClassName, "", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, cc.hInstance, nullptr);
 
@@ -3670,7 +3667,7 @@ int main(int argc, char** argv) {
         startEsp();
     }
 
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
     bool updating = false;
 #endif
     MSG m;
@@ -3684,7 +3681,7 @@ int main(int argc, char** argv) {
             DispatchMessageA(&m);
         }
         if (quit) break;
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
         if (updatePending()) {
             updating = true;
             break;
@@ -3704,8 +3701,9 @@ int main(int argc, char** argv) {
         if (gAutoResumeAt && gRun == Run::Idle && GetTickCount64() >= gAutoResumeAt) {
             gAutoResumeAt = 0;
             logLine("[*] auto-resume: attaching again");
-            startEsp();
+            startEsp(true);
         }
+        trigger::pollInputs();
         if (gRun == Run::Running && gOverlay) {
             runFrame();
             if (!gGpu && !gSettings.uncapped && FAILED(DwmFlush())) Sleep(5);
@@ -3722,7 +3720,7 @@ int main(int argc, char** argv) {
     ui::shutdown();
     Gdiplus::GdiplusShutdown(token);
     int exitCode = 0;
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
     if (updating) exitCode = swapAndRelaunch();
     logLine("[log] quit%s", updating ? " (for update)" : "");
     if (gLog) std::fclose(gLog);

@@ -21,7 +21,7 @@ bool official(const std::string& id);
 std::string label(const std::string& id);
 
 void setDir(const std::string& mapsDir);
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
 void setLog(void (*fn)(const char*));
 #endif
 

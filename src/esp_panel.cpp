@@ -1,4 +1,5 @@
 #include "esp_launcher.h"
+#include "brand.h"
 #include "ui.h"
 #include "version.h"
 
@@ -343,9 +344,15 @@ void paint(HDC hdc) {
 
     {
         fillGrad(g, RectF(20, 22, 34, 34), th::a1, th::a2, 10, LinearGradientModeForwardDiagonal);
-        drawIcon(g, Icon::Crosshair, 28, 30, th::white);
-        text(g, "ICKZA", *fonts.semi, RectF(64, 22, SW - 72, 18), th::text, StringAlignmentNear);
-        text(g, "DayZ · v" ICKZA_VERSION, *fonts.caption, RectF(64, 40, SW - 72, 16), th::dim, StringAlignmentNear);
+        Pen logo(th::white, 1.6f);
+        logo.SetStartCap(LineCapRound);
+        logo.SetEndCap(LineCapRound);
+        for (const float side : {-1.f, 1.f})
+            for (const auto& line : brand::deer)
+                g.DrawLine(&logo, 37.f + side * line.x1 * 14.f, 39.f + line.y1 * 14.f,
+                           37.f + side * line.x2 * 14.f, 39.f + line.y2 * 14.f);
+        text(g, brand::name, *fonts.semi, RectF(64, 22, SW - 72, 18), th::text, StringAlignmentNear);
+        text(g, "DayZ · v" HIRSCHGANGWARE_VERSION, *fonts.caption, RectF(64, 40, SW - 72, 16), th::dim, StringAlignmentNear);
 
         sideItem(g, "Setup", Icon::Sliders, 92);
 
@@ -529,14 +536,15 @@ HWND createPanel(EspSettings& s, PanelHooks hooks) {
     wc.lpfnWndProc = proc;
     wc.hInstance = GetModuleHandleW(nullptr);
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    wc.lpszClassName = L"ickza_panel";
+    wc.lpszClassName = L"hirschgangware_panel";
+    wc.hIcon = LoadIconW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(brand::iconResource));
     RegisterClassExW(&wc);
 
     RECT work{};
     SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
     const int w = static_cast<int>(W * p.scale), h = static_cast<int>(H * p.scale);
     const int x = work.left + (work.right - work.left - w) / 2, y = work.top + (work.bottom - work.top - h) / 2;
-    p.hwnd = CreateWindowExW(WS_EX_APPWINDOW | WS_EX_TOPMOST, wc.lpszClassName, L"Ickza", WS_POPUP | WS_MINIMIZEBOX, x, y, w, h, nullptr, nullptr,
+    p.hwnd = CreateWindowExW(WS_EX_APPWINDOW | WS_EX_TOPMOST, wc.lpszClassName, L"HirschgangWare", WS_POPUP | WS_MINIMIZEBOX, x, y, w, h, nullptr, nullptr,
                              wc.hInstance, nullptr);
     if (!p.hwnd) return nullptr;
     const DWORD round = 2;

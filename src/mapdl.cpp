@@ -83,7 +83,7 @@ constexpr int kTile = 256;
 constexpr uint8_t kMissB = 30, kMissG = 24, kMissR = 20;
 
 std::string gDir;
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
 void (*gLog)(const char*) = nullptr;
 void dlog(const char* fmt, ...) {
     char b[512];
@@ -123,10 +123,10 @@ std::wstring widen(const std::string& s) {
 
 HINTERNET session() {
     static HINTERNET s = [] {
-        HINTERNET h = WinHttpOpen(L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) Ickza", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+        HINTERNET h = WinHttpOpen(L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) HirschgangWare", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
                                   WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
         if (!h)
-            h = WinHttpOpen(L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) Ickza", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+            h = WinHttpOpen(L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) HirschgangWare", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
                             WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
         if (h) WinHttpSetTimeouts(h, 10000, 10000, 15000, 30000);
         return h;
@@ -625,7 +625,7 @@ void setDir(const std::string& mapsDir) {
     gDir = mapsDir;
     gSizes.clear();
 }
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
 void setLog(void (*fn)(const char*)) { gLog = fn; }
 #endif
 

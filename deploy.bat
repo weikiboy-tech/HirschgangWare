@@ -13,8 +13,8 @@ if not exist "%DEST%\" (
 )
 >laptop\address.txt echo %TARGET%
 
-copy /y build\Ickza.exe "%DEST%\Ickza_pending.exe" >nul || (echo copy failed - cannot reach %DEST% & exit /b 1)
-copy /y laptop\run_ickza.bat "%DEST%\" >nul
+copy /y build\HirschgangWare.exe "%DEST%\HirschgangWare_pending.exe" >nul || (echo copy failed - cannot reach %DEST% & exit /b 1)
+copy /y laptop\run_hirschgangware.bat "%DEST%\" >nul
 if not exist "%DEST%\dayz_rare.txt" copy /y laptop\dayz_rare.txt "%DEST%\" >nul
 if not exist "%DEST%\dayz_loot_cats.txt" copy /y laptop\dayz_loot_cats.txt "%DEST%\" >nul
 if exist build\dma\ robocopy build\dma "%DEST%\dma" /e /xo /njh /njs /ndl /nfl >nul

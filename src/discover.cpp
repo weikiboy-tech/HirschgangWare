@@ -1944,7 +1944,7 @@ void findHandItem(const Process& p, const Image& img, const DiscoverConfig& cfg,
     if (lines.empty()) {
         say("[*] hand item: nothing changed. Make sure the second item is really in your hands, and rerun.");
     } else {
-        say("[*] hand item: paths whose item changed (the one matching your swap = Ickza dz::kInventory -> kHandItem):");
+        say("[*] hand item: paths whose item changed (the one matching your swap = HirschgangWare dz::kInventory -> kHandItem):");
         for (const auto& l : lines) say(l);
     }
 }

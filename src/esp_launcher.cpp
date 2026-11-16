@@ -10,16 +10,26 @@
 namespace {
 
 constexpr UINT kIdentifyMs = 2500;
-constexpr char kSection[] = "Ickza";
-constexpr char kIdentifyClass[] = "ickza_identify";
+constexpr char kSection[] = "HirschgangWare";
+constexpr char kIdentifyClass[] = "hirschgangware_identify";
 std::vector<HWND> gIdentify;
 
-std::string iniPath() {
+std::string settingsPath(const char* file) {
     char buf[MAX_PATH];
     GetModuleFileNameA(nullptr, buf, MAX_PATH);
     std::string p = buf;
-    return p.substr(0, p.find_last_of("\\/") + 1) + "Ickza.ini";
+    return p.substr(0, p.find_last_of("\\/") + 1) + file;
 }
+
+std::string iniPath() { return settingsPath("HirschgangWare.ini"); }
+
+bool hasNewSettings() { return GetFileAttributesA(iniPath().c_str()) != INVALID_FILE_ATTRIBUTES; }
+
+std::string readIniPath() {
+    return hasNewSettings() ? iniPath() : settingsPath("Ickza.ini");
+}
+
+const char* readSection() { return hasNewSettings() ? kSection : "Ickza"; }
 
 LRESULT CALLBACK identifyProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == WM_PAINT) {
@@ -50,11 +60,11 @@ void closeIdentify() {
     gIdentify.clear();
 }
 
-bool readBool(const char* key, bool def) { return GetPrivateProfileIntA(kSection, key, def ? 1 : 0, iniPath().c_str()) != 0; }
+bool readBool(const char* key, bool def) { return GetPrivateProfileIntA(readSection(), key, def ? 1 : 0, readIniPath().c_str()) != 0; }
 
 std::string readString(const char* key, const std::string& def) {
     char buf[8192];
-    GetPrivateProfileStringA(kSection, key, def.c_str(), buf, sizeof buf, iniPath().c_str());
+    GetPrivateProfileStringA(readSection(), key, def.c_str(), buf, sizeof buf, readIniPath().c_str());
     return buf;
 }
 
@@ -136,29 +146,29 @@ void loadSettings(EspSettings& s) {
     s.dmaDir = readString("dma_dir", s.dmaDir);
     s.fullscreen = readBool("fullscreen", s.fullscreen);
     s.displayDevice = readString("display_device", s.displayDevice);
-    s.displayW = GetPrivateProfileIntA(kSection, "display_width", s.displayW, iniPath().c_str());
-    s.displayH = GetPrivateProfileIntA(kSection, "display_height", s.displayH, iniPath().c_str());
+    s.displayW = GetPrivateProfileIntA(readSection(), "display_width", s.displayW, readIniPath().c_str());
+    s.displayH = GetPrivateProfileIntA(readSection(), "display_height", s.displayH, readIniPath().c_str());
     s.skeleton = readBool("skeleton", s.skeleton);
     s.fps = readBool("fps", s.fps);
     s.uncapped = readBool("uncapped", s.uncapped);
-    s.predictMs = GetPrivateProfileIntA(kSection, "predict_ms", s.predictMs, iniPath().c_str());
-    s.dzRange = GetPrivateProfileIntA(kSection, "dz_range", s.dzRange, iniPath().c_str());
+    s.predictMs = GetPrivateProfileIntA(readSection(), "predict_ms", s.predictMs, readIniPath().c_str());
+    s.dzRange = GetPrivateProfileIntA(readSection(), "dz_range", s.dzRange, readIniPath().c_str());
     s.dzRange = s.dzRange <= 0 ? 1000 : std::clamp(int(s.dzRange), 25, 1500);
     s.dzLoot = readBool("dz_loot", s.dzLoot);
-    s.dzLootRange = GetPrivateProfileIntA(kSection, "dz_loot_range", s.dzLootRange, iniPath().c_str());
-#ifndef ICKZA_NO_DIAG
+    s.dzLootRange = GetPrivateProfileIntA(readSection(), "dz_loot_range", s.dzLootRange, readIniPath().c_str());
+#ifndef HIRSCHGANGWARE_NO_DIAG
     s.dzBoneIds = readBool("dz_bone_ids", s.dzBoneIds);
 #endif
     s.dzAnimals = readBool("dz_animals", s.dzAnimals);
     s.dzVehicles = readBool("dz_vehicles", s.dzVehicles);
     s.dzLootValuables = readBool("dz_loot_valuables", s.dzLootValuables);
     s.dzHeld = readBool("dz_held", s.dzHeld);
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
     s.dzNameAnchor = readString("dz_name_anchor", s.dzNameAnchor);
 #endif
     s.dzRadar = readBool("dz_radar", s.dzRadar);
-    s.dzRadarRange = GetPrivateProfileIntA(kSection, "dz_radar_range", s.dzRadarRange, iniPath().c_str());
-    s.dzRadarSize = GetPrivateProfileIntA(kSection, "dz_radar_size", s.dzRadarSize, iniPath().c_str());
+    s.dzRadarRange = GetPrivateProfileIntA(readSection(), "dz_radar_range", s.dzRadarRange, readIniPath().c_str());
+    s.dzRadarSize = GetPrivateProfileIntA(readSection(), "dz_radar_size", s.dzRadarSize, readIniPath().c_str());
     s.dzMap = readString("dz_map", s.dzMap);
     s.dzMapAuto = readBool("dz_map_auto", s.dzMapAuto);
     s.dzMapTopo = readBool("dz_map_topo", s.dzMapTopo);
@@ -166,21 +176,21 @@ void loadSettings(EspSettings& s) {
     s.dzRadarScreen = readBool("dz_radar_screen", s.dzRadarScreen);
     s.dzSideOpen = readBool("dz_side_open", s.dzSideOpen);
     s.dzMenu = readBool("dz_menu", s.dzMenu);
-    s.dzRadarZoom = GetPrivateProfileIntA(kSection, "dz_radar_zoom", s.dzRadarZoom, iniPath().c_str());
+    s.dzRadarZoom = GetPrivateProfileIntA(readSection(), "dz_radar_zoom", s.dzRadarZoom, readIniPath().c_str());
     s.dzInfected = readBool("dz_infected", readBool("dz_radar_infected", s.dzInfected));
     s.dzRadarNames = readBool("dz_radar_names", s.dzRadarNames);
-    s.dzRadarLootLabel = GetPrivateProfileIntA(kSection, "dz_radar_loot_label", s.dzRadarLootLabel, iniPath().c_str());
-    s.dzRadarMarker = GetPrivateProfileIntA(kSection, "dz_radar_marker_x100", int(s.dzRadarMarker * 100 + 0.5f), iniPath().c_str()) / 100.f;
+    s.dzRadarLootLabel = GetPrivateProfileIntA(readSection(), "dz_radar_loot_label", s.dzRadarLootLabel, readIniPath().c_str());
+    s.dzRadarMarker = GetPrivateProfileIntA(readSection(), "dz_radar_marker_x100", int(s.dzRadarMarker * 100 + 0.5f), readIniPath().c_str()) / 100.f;
     s.dzLootCats = unsigned(std::strtoul(readString("dz_loot_cats", std::to_string(s.dzLootCats)).c_str(), nullptr, 10));
     s.dzRadarHeadings = readBool("dz_radar_headings", s.dzRadarHeadings);
-    s.dzRadarHeadingLen = GetPrivateProfileIntA(kSection, "dz_radar_heading_len", s.dzRadarHeadingLen, iniPath().c_str());
-    s.dzFilterMode = GetPrivateProfileIntA(kSection, "dz_filter_mode", s.dzFilterMode, iniPath().c_str());
+    s.dzRadarHeadingLen = GetPrivateProfileIntA(readSection(), "dz_radar_heading_len", s.dzRadarHeadingLen, readIniPath().c_str());
+    s.dzFilterMode = GetPrivateProfileIntA(readSection(), "dz_filter_mode", s.dzFilterMode, readIniPath().c_str());
     s.dzFilterList = readString("dz_filter_list", s.dzFilterList);
     s.box = readBool("box", s.box);
     s.names = readBool("names", s.names);
     s.info = readBool("info", s.info);
     s.crosshair = readBool("crosshair", s.crosshair);
-    s.crosshairSize = GetPrivateProfileIntA(kSection, "crosshair_size", s.crosshairSize, iniPath().c_str());
+    s.crosshairSize = GetPrivateProfileIntA(readSection(), "crosshair_size", s.crosshairSize, readIniPath().c_str());
 }
 
 void saveSettings(const EspSettings& s) {
@@ -198,14 +208,14 @@ void saveSettings(const EspSettings& s) {
     writeString("dz_range", std::to_string(s.dzRange));
     writeBool("dz_loot", s.dzLoot);
     writeString("dz_loot_range", std::to_string(s.dzLootRange));
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
     writeBool("dz_bone_ids", s.dzBoneIds);
 #endif
     writeBool("dz_animals", s.dzAnimals);
     writeBool("dz_vehicles", s.dzVehicles);
     writeBool("dz_loot_valuables", s.dzLootValuables);
     writeBool("dz_held", s.dzHeld);
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
     writeString("dz_name_anchor", s.dzNameAnchor);
 #endif
     writeBool("dz_radar", s.dzRadar);

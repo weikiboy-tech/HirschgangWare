@@ -78,7 +78,7 @@ void save() {
     std::lock_guard<std::mutex> lk(gMx);
     std::ofstream f(filePath(), std::ios::trunc);
     if (!f) return;
-    f << "# Ickza teammates - one player name per line; marked players are green on ESP + radar\n";
+    f << "# HirschgangWare teammates - one player name per line; marked players are green on ESP + radar\n";
     for (const std::string& k : gNames) f << k << "\n";
 }
 

@@ -23,7 +23,7 @@ struct Image {
     std::vector<Section> sections;
 
     bool load(const Process& p, std::string& err);
-#ifndef ICKZA_NO_DIAG
+#ifndef HIRSCHGANGWARE_NO_DIAG
     bool loadFile(const std::string& path, std::string& err);
 #endif
 
