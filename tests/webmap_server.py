@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 import base64
 import http.client as http_client
 import json
+import re
 from pathlib import Path
 import shutil
 import socket
@@ -187,11 +188,36 @@ try:
             _, body = frame(stream)
             players = json.loads(body)["layers"].get("players")
             if players:
-                assert players == [{"x": 500, "z": 1000, "heading": 90}, {"x": 600, "z": 1000}]
+                assert players[0]["friend"] is True
+                assert players[0]["heading"] == 90
+                assert "friend" not in players[1] and "heading" not in players[1]
+                track_ids = [p["id"] for p in players]
+                assert all(re.fullmatch(r"[0-9a-f]{16}-(42|43)", pid) for pid in track_ids)
+                assert track_ids[0] != track_ids[1]
                 assert b"private-player" not in body
+                assert "name" not in json.loads(body)["me"]
                 break
         else:
             raise AssertionError("missing released player heading")
+
+    server.stdin.write("names\n")
+    server.stdin.flush()
+    wait_http()
+    for _ in range(2):
+        _, sock, stream = websocket()
+        with sock, stream:
+            for _ in range(12):
+                _, body = frame(stream)
+                snap = json.loads(body)
+                players = snap["layers"].get("players")
+                if players and players[0].get("name"):
+                    assert [p["name"] for p in players] == ["private-player", "Second player"]
+                    assert [p["id"] for p in players] == track_ids
+                    assert snap["me"]["name"] == "private-name"
+                    assert players[0]["friend"] is True
+                    break
+            else:
+                raise AssertionError("missing released names")
 
     server.stdin.write("off\n")
     server.stdin.flush()

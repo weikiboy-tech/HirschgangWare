@@ -39,8 +39,7 @@ input { accent-color: var(--accent); }
 .brand strong { font-size: 1.08rem; }
 .brand small { display: block; color: var(--muted); margin-top: .15rem; }
 .brand-mark {
-  display: grid; place-items: center; width: 2.5rem; height: 2.5rem; border-radius: .7rem;
-  background: #163a39; color: var(--accent); font-size: 1.35rem;
+  display: block; width: 3rem; height: 3rem; flex: 0 0 auto; object-fit: contain;
 }
 .brand button { margin-left: auto; }
 section { border-top: 1px solid var(--border); padding: .9rem 0; }

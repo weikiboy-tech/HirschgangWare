@@ -1754,7 +1754,8 @@ void drawSettingsBody(Config& cfg, const Counts& n, bool live, const std::vector
         struct Share { const char* label; webmap::Release bit; };
         constexpr Share shares[]{
             {"Publish current map", webmap::CurrentMap}, {"Own position", webmap::Own},
-            {"Own heading", webmap::Heading}, {"Player positions", webmap::Players},
+            {"Own heading", webmap::Heading}, {"Players (positions and friends)", webmap::Players},
+            {"Player names (web tracking)", webmap::PlayerNames},
             {"Infected", webmap::Infected}, {"Animals", webmap::Animals},
             {"Vehicles", webmap::Vehicles}, {"Loot (local filters apply)", webmap::Loot},
         };
@@ -1762,7 +1763,9 @@ void drawSettingsBody(Config& cfg, const Counts& n, bool live, const std::vector
         for (const auto& share : shares) {
             ImGui::PushID(int(share.bit));
             ImGui::BeginDisabled((share.bit != webmap::CurrentMap && !cfg.webmap.shares(webmap::CurrentMap)) ||
-                                 (share.bit == webmap::Heading && !cfg.webmap.shares(webmap::Own)));
+                                 (share.bit == webmap::Heading && !cfg.webmap.shares(webmap::Own)) ||
+                                 (share.bit == webmap::PlayerNames && !cfg.webmap.shares(webmap::Own) &&
+                                  !cfg.webmap.shares(webmap::Players)));
             bool on = cfg.webmap.shares(share.bit);
             if (switchRow(share.label, &on)) {
                 if (on) cfg.webmap.release |= share.bit;

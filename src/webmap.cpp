@@ -191,6 +191,27 @@ void appendHeading(std::ostream& out, float x, float z) {
         out << ",\"heading\":" << std::atan2(x, z) * (180.0 / 3.14159265358979323846);
 }
 
+void appendPlayerName(std::ostream& out, const Options& opt, const std::string& name) {
+    if (opt.shares(PlayerNames) && !name.empty() && name.size() <= 80)
+        out << ",\"name\":" << json(name);
+}
+
+const std::string& trackingSession() {
+    static const auto id = [] {
+        unsigned char bytes[8]{};
+        if (BCryptGenRandom(nullptr, bytes, sizeof(bytes), BCRYPT_USE_SYSTEM_PREFERRED_RNG) < 0)
+            return std::string{};
+        constexpr char hex[] = "0123456789abcdef";
+        std::string token;
+        for (unsigned char byte : bytes) {
+            token += hex[byte >> 4];
+            token += hex[byte & 15];
+        }
+        return token;
+    }();
+    return id;
+}
+
 std::string packet(const Options& opt, const std::shared_ptr<const Snapshot>& snap) {
     const bool live = opt.shares(CurrentMap) && snap && Clock::now() - snap->captured < 1500ms;
     const std::string map = live && opt.shares(CurrentMap) && validId(snap->map) ? snap->map : "";
@@ -203,6 +224,7 @@ std::string packet(const Options& opt, const std::shared_ptr<const Snapshot>& sn
         const auto& fr = snap->frame;
         out << "{\"x\":" << fr.meX << ",\"z\":" << fr.meZ;
         if (opt.shares(Heading)) appendHeading(out, fr.fwdX, fr.fwdZ);
+        appendPlayerName(out, opt, fr.meName);
         out << '}';
     } else {
         out << "null";
@@ -220,7 +242,13 @@ std::string packet(const Options& opt, const std::shared_ptr<const Snapshot>& sn
             if (count++) out << ',';
             out << "{\"x\":" << d.x << ",\"z\":" << d.z;
             if (d.icon == radar::Icon::Loot) out << ",\"category\":" << d.cat;
-            if (d.icon == radar::Icon::Survivor) appendHeading(out, d.fwdX, d.fwdZ);
+            if (d.icon == radar::Icon::Survivor) {
+                appendHeading(out, d.fwdX, d.fwdZ);
+                appendPlayerName(out, opt, d.name);
+                if (d.webFriend) out << ",\"friend\":true";
+                if (d.webTrackId && !trackingSession().empty())
+                    out << ",\"id\":\"" << trackingSession() << '-' << d.webTrackId << '"';
+            }
             out << '}';
             if (count == 512) break;
         }
@@ -453,6 +481,8 @@ bool request(Client& c, const Settings& setup, const Maps& maps) {
         struct Asset { const char* route; const wchar_t* file; const char* type; };
         constexpr Asset assets[] = {
             {"/", L"index.html", "text/html; charset=utf-8"},
+            {"/hirschgang-dont-press-me", L"index.html", "text/html; charset=utf-8"},
+            {"/hirschgang-logo.png", L"hirschgang-logo.png", "image/png"},
             {"/app.js", L"app.js", "text/javascript; charset=utf-8"},
             {"/map.js", L"map.js", "text/javascript; charset=utf-8"},
             {"/live.js", L"live.js", "text/javascript; charset=utf-8"},

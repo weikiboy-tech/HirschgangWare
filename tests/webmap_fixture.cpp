@@ -13,7 +13,7 @@ int main(int argc, char** argv) {
     options.release = webmap::CurrentMap | webmap::Own | webmap::Heading | webmap::Loot;
     options.publicHost = "webmap.example.com";
     webmap::configure(options, argv[1]);
-    std::atomic<bool> stop{false};
+    std::atomic<bool> stop{false}, friendMarked{true};
     std::thread writer([&] {
         unsigned generation = 0;
         while (!stop.load()) {
@@ -27,8 +27,10 @@ int main(int argc, char** argv) {
             frame.meName = "private-name";
             radar::Dot player;
             player.x = 500; player.z = 1000; player.fwdX = 1; player.name = "private-player";
+            player.webTrackId = 42; player.webFriend = friendMarked.load();
             frame.dots.push_back(player);
             player.x = 600; player.fwdX = 0;
+            player.webTrackId = 43; player.webFriend = false; player.name = "Second player";
             frame.dots.push_back(player);
             radar::Dot loot;
             loot.icon = radar::Icon::Loot; loot.x = x; loot.z = 2 * x;
@@ -41,9 +43,12 @@ int main(int argc, char** argv) {
     std::string line;
     while (std::getline(std::cin, line)) {
         if (line == "quit") break;
+        if (line == "unfriend") { friendMarked = false; continue; }
         options.enabled = line != "off";
         options.release = line == "hide" ? 0 : webmap::CurrentMap | webmap::Own | webmap::Heading | webmap::Loot;
-        if (line == "players") options.release |= webmap::Players;
+        if (line == "players" || line == "names") options.release |= webmap::Players;
+        if (line == "names") options.release |= webmap::PlayerNames;
+        if (line == "guests") options.release = webmap::CurrentMap | webmap::Players | webmap::PlayerNames;
         webmap::configure(options, argv[1]);
     }
     stop = true;

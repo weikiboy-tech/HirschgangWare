@@ -193,7 +193,7 @@ void loadSettings(EspSettings& s) {
     s.webmap.enabled = readBool("webmap_enabled", s.webmap.enabled);
     s.webmap.port = std::clamp(int(GetPrivateProfileIntA(readSection(), "webmap_port", s.webmap.port, readIniPath().c_str())), 1024, 65535);
     s.webmap.hz = std::clamp(int(GetPrivateProfileIntA(readSection(), "webmap_hz", s.webmap.hz, readIniPath().c_str())), 1, 20);
-    s.webmap.release = GetPrivateProfileIntA(readSection(), "webmap_release", 0, readIniPath().c_str()) & 255u;
+    s.webmap.release = GetPrivateProfileIntA(readSection(), "webmap_release", 0, readIniPath().c_str()) & webmap::AllReleases;
     s.webmap.publicHost = readString("webmap_public_host", "");
     s.crosshairSize = GetPrivateProfileIntA(readSection(), "crosshair_size", s.crosshairSize, readIniPath().c_str());
 }

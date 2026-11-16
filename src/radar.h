@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -22,6 +23,8 @@ struct Dot {
     float fwdX = 0, fwdZ = 0;
     std::string label;
     std::string name;  // clean player name (survivors only) for friend toggling
+    uint32_t webTrackId = 0;
+    bool webFriend = false;
 };
 
 struct Place {

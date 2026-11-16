@@ -5,12 +5,13 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="color-scheme" content="dark">
   <title>HirschgangWare Webmap</title>
+  <link rel="icon" href="/hirschgang-logo.png" type="image/png">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <div id="layout">
     <aside id="sidebar" aria-label="Karteneinstellungen">
-      <div class="brand"><span class="brand-mark" aria-hidden="true">⌖</span><div><strong>HirschgangWare</strong><small>Webmap</small></div>
+      <div class="brand"><img class="brand-mark" src="/hirschgang-logo.png" width="48" height="48" alt=""><div><strong>HirschgangWare</strong><small>Webmap</small></div>
         <button id="close-sidebar" class="icon" type="button" aria-label="Sidebar einklappen" title="Sidebar einklappen">‹</button></div>
       <section>
         <h2>Karte</h2>
@@ -20,12 +21,14 @@
         <div class="actions">
           <button id="zoom-out" type="button" title="Verkleinern" aria-label="Verkleinern">−</button>
           <button id="zoom-in" type="button" title="Vergrößern" aria-label="Vergrößern">+</button>
-          <button id="center" type="button" title="Eigene Position verfolgen" aria-label="Eigene Position verfolgen">⌖</button>
+          <button id="center" type="button" title="Tracking-Ziel verfolgen" aria-label="Tracking-Ziel verfolgen">⌖</button>
           <button id="fullscreen" type="button" title="Vollbild" aria-label="Vollbild">⛶</button>
         </div>
       </section>
       <section>
         <h2>Tracking</h2>
+        <label class="field" for="tracking-target">Spieler auswählen</label>
+        <select id="tracking-target"></select>
         <label class="toggle"><span>Auto-Follow</span><input id="follow" type="checkbox"></label>
         <label class="toggle"><span>Auto-Rotation</span><input id="rotate" type="checkbox"></label>
         <p id="orientation" class="hint">North-Up</p>

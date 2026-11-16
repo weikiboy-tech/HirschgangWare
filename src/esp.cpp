@@ -145,6 +145,8 @@ std::unordered_map<uint64_t, uint64_t> gDzEntVs;
 std::unordered_map<uint64_t, Vec3> gDzEntVel;
 std::unordered_map<uint64_t, uint64_t> gDzEntPosUs;
 std::unordered_map<uint64_t, std::pair<float, float>> gDzEntFwd;
+std::unordered_map<uint64_t, uint32_t> gDzWebTrackIds;
+uint32_t gDzNextWebTrackId = 0;
 std::unordered_map<uint64_t, std::string> gDzEntName;
 std::unordered_map<uint64_t, uint64_t> gDzLootVs;
 std::unordered_map<uint64_t, Vec3> gDzLootPos;
@@ -194,6 +196,7 @@ struct DzSnap {
         uint64_t ptr = 0;
         Vec3 feet;
         float fwdX = 0, fwdZ = 0;
+        uint32_t webTrackId = 0;
         Vec3 vel{};
         uint64_t posUs = 0;
         std::string name;
@@ -1151,6 +1154,7 @@ void scanDayz(DzSnap& out, const char*& stage) {
         prune(gDzEntVel);
         prune(gDzEntPosUs);
         prune(gDzEntFwd);
+        prune(gDzWebTrackIds);
         prune(gDzEntJointOfs);
         prune(gDzEntReadUs);
         prune(gDzEntBoneUs);
@@ -1336,6 +1340,11 @@ void scanDayz(DzSnap& out, const char*& stage) {
             ee.kind = targets[i].kind;
             ee.ptr = ptr;
             ee.feet = pit->second;
+            if (ee.kind == 1) {
+                auto& id = gDzWebTrackIds[ptr];
+                if (!id) id = ++gDzNextWebTrackId;
+                ee.webTrackId = id;
+            }
             if (const auto fIt = gDzEntFwd.find(ptr); fIt != gDzEntFwd.end()) ee.fwdX = fIt->second.first, ee.fwdZ = fIt->second.second;
             const auto vIt = gDzEntVel.find(ptr);
             if (vIt != gDzEntVel.end()) ee.vel = vIt->second;
@@ -2375,7 +2384,7 @@ void stopDzThread() {
     if (gDzLootThread.joinable()) gDzLootThread.join();
 }
 
-void publishWebmap(const DzSnap& snap, const dz::Cam& view) {
+void publishWebmap(const DzSnap& snap, const Vec3* heading) {
     const auto& options = gSettings.webmap;
     if (!options.enabled || !options.shares(webmap::CurrentMap)) return;
     static uint64_t last = 0;
@@ -2387,7 +2396,7 @@ void publishWebmap(const DzSnap& snap, const dz::Cam& view) {
         return;
     }
 
-    const auto& id = snap.mapId;
+    const auto& id = gSettings.dzMapAuto && !snap.mapId.empty() ? snap.mapId : gSettings.dzMap;
     if (id.empty()) {
         webmap::clear();
         return;
@@ -2398,15 +2407,22 @@ void publishWebmap(const DzSnap& snap, const dz::Cam& view) {
     if (frame.ok) {
         frame.meX = snap.me.x;
         frame.meZ = snap.me.z;
-        if (options.shares(webmap::Heading)) {
-            frame.fwdX = view.fwd.x;
-            frame.fwdZ = view.fwd.z;
+        if (options.shares(webmap::PlayerNames)) frame.meName = snap.meName;
+        if (options.shares(webmap::Heading) && heading) {
+            frame.fwdX = heading->x;
+            frame.fwdZ = heading->z;
         }
     }
-    const auto add = [&](float x, float z, radar::Icon icon, int cat = 0, float fwdX = 0, float fwdZ = 0) {
+    const auto add = [&](float x, float z, radar::Icon icon, int cat = 0, const DzSnap::E* player = nullptr) {
         radar::Dot d;
         d.x = x; d.z = z; d.icon = icon; d.cat = cat;
-        d.fwdX = fwdX; d.fwdZ = fwdZ;
+        if (player) {
+            d.fwdX = player->fwdX;
+            d.fwdZ = player->fwdZ;
+            d.webTrackId = player->webTrackId;
+            d.webFriend = !player->name.empty() && friends::contains(player->name);
+            if (options.shares(webmap::PlayerNames)) d.name = player->name;
+        }
         frame.dots.push_back(std::move(d));
     };
     unsigned counts[5]{};
@@ -2419,8 +2435,7 @@ void publishWebmap(const DzSnap& snap, const dz::Cam& view) {
             const size_t kind = size_t(d.kind - 1);
             if (!radarLayer[kind] || !options.shares(release[kind]) || counts[kind] == 512) continue;
             if (!std::isfinite(d.feet.x) || !std::isfinite(d.feet.z)) continue;
-            if (d.kind == 1) add(d.feet.x, d.feet.z, icon[kind], 0, d.fwdX, d.fwdZ);
-            else add(d.feet.x, d.feet.z, icon[kind]);
+            add(d.feet.x, d.feet.z, icon[kind], 0, d.kind == 1 ? &d : nullptr);
             ++counts[kind];
         }
     }
@@ -2466,7 +2481,7 @@ bool drawDayzFrame() {
         gDzMeHeldDraw = snap.meHeld;
         gDzOnlineDraw = snap.online;
         projectDz(snap, view, me);
-        publishWebmap(snap, view);
+        publishWebmap(snap, &view.fwd);
 
         {
             static std::vector<trigger::Cand> trigCands;
@@ -2518,7 +2533,8 @@ bool drawDayzFrame() {
     } else {
         gBoxes.clear();
         gDzLootPts.clear();
-        if (gSettings.webmap.enabled) webmap::clear();
+        const bool recentHeading = snap.cam && cs.tUs && nowUs - cs.tUs < 1500000;
+        publishWebmap(snap, recentHeading ? &cs.c.fwd : nullptr);
         gDzRadar.ok = false;
         trigger::update({}, 0.f, 0.f);
         static std::string lastRxSeen2;
@@ -3054,6 +3070,7 @@ void stopEsp() {
     gDzEntVel.clear();
     gDzEntPosUs.clear();
     gDzEntFwd.clear();
+    gDzWebTrackIds.clear();
     gDzEntName.clear();
     gDzEntChain.clear();
     gDzEntJointOfs.clear();
@@ -3539,6 +3556,13 @@ void startEsp() {
                 if (dma && err != lastErr) logLine("[*] %s", (lastErr = err).c_str());
 #endif
                 Sleep(500);
+            }
+            if (*cancel) return;
+            if (dma) {
+                const uint64_t before = qpcUs();
+                const bool keyboardReady = res->proc->prepareRemoteKeys();
+                logLine("[log] PCIe keyboard setup before capture: %s (%.1f ms)",
+                        keyboardReady ? "ready" : "unavailable", double(qpcUs() - before) / 1000.0);
             }
             if (*cancel) return;
             Image img;

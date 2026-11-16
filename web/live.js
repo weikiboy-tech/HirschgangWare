@@ -4,6 +4,16 @@ const validPoint = p => p && Number.isFinite(p.x) && Number.isFinite(p.z) &&
   p.x >= 0 && p.z >= 0 && p.x <= 100000 && p.z <= 100000;
 
 const validHeading = value => value === undefined || (Number.isFinite(value) && Math.abs(value) <= 360);
+export const validPlayerId = id => typeof id === "string" && /^[0-9a-f]{16}-[1-9][0-9]{0,9}$/.test(id);
+const playerName = name => typeof name === "string" && name.length <= 80 ? name : undefined;
+
+export function trackingTargets(snapshot, showPlayers) {
+  const players = showPlayers ? snapshot?.layers.players ?? [] : [];
+  return new Map([
+    ...(snapshot?.me ? [["own", snapshot.me]] : []),
+    ...players.filter(p => p.id).map(p => [p.id, p]),
+  ]);
+}
 
 export function decode(raw) {
   if (typeof raw !== "string" || raw.length > 192 * 1024) return null;
@@ -17,13 +27,24 @@ export function decode(raw) {
   for (const key of Object.keys(p.layers)) {
     const dots = p.layers[key];
     if (!layers.includes(key) || !Array.isArray(dots) || dots.length > 512 || !dots.every(validPoint)) return null;
-    if (key === "players" && !dots.every(p => validHeading(p.heading))) return null;
-    safe[key] = dots.map(({x, z, category, heading}) => ({
+    const playerIds = new Set();
+    safe[key] = dots.map(({x, z, category, heading, id, name, friend}) => ({
       x, z, category: Number.isInteger(category) ? category : null,
       heading: key === "players" ? heading : undefined,
+      id: key === "players" ? id : undefined,
+      name: key === "players" ? playerName(name) : undefined,
+      friend: key === "players" && friend === true,
     }));
+    if (key === "players") {
+      for (const {id, heading} of safe[key]) {
+        if (!validHeading(heading)) return null;
+        if (id === undefined) continue;
+        if (!validPlayerId(id) || playerIds.has(id)) return null;
+        playerIds.add(id);
+      }
+    }
   }
-  const me = p.me === null ? null : { x: p.me.x, z: p.me.z, heading: p.me.heading };
+  const me = p.me === null ? null : { x: p.me.x, z: p.me.z, heading: p.me.heading, name: playerName(p.me.name) };
   return { live: p.live, map: p.map, me, layers: safe };
 }
 

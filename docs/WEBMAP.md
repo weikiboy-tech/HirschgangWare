@@ -16,6 +16,10 @@ render thread or calls into Process. A single server worker owns its sockets,
 map inventory and JSON serialization. Publication replaces the previous
 immutable snapshot. It does not queue packets for slow clients.
 
+The position feed uses the latest scan independently of camera reads. The
+selected native map is used while automatic world detection has no result.
+A brief camera gap can reuse the last heading within the freshness window.
+
 The local renderer maps x to u = x / worldSize and z to v = 1 - z / worldSize.
 The browser uses the same geometry with x east and z north. It draws the entire
 raster into a world-sized square regardless of image pixel dimensions. The
@@ -45,20 +49,32 @@ webmap_public_host=
 ```
 
 Release bits are 1 current map, 2 own position, 4 own heading, 8 player
-positions, 16 infected, 32 animals, 64 vehicles, 128 loot. For example,
+positions with headings and friend markers, 16 infected, 32 animals, 64 vehicles,
+128 loot, and 256 player names for the Tracking menu. For example,
 `webmap_release=7` publishes the current map and own marker with heading.
 The map bit is required for all live data, and own position is required for
 heading. Loot also requires the local loot reader and respects its category
 and name filters. The local infected, animal and vehicle visibility settings also apply to their released layers. Browser filters only hide already released markers.
 Server positions outside the selected world's bounds and nonfinite positions
-are discarded. The own position is derived from the game snapshot, not from
-the fallback camera location. No player names, loadouts, server information,
-credentials, process identifiers or memory addresses are published. Entity
-labels in the browser are generic. The player layer includes a direction
-arrow when a valid facing direction is available. Clicking the own marker or the GPS button
-enables Follow. Dragging disables Follow and leaves rotation enabled. Zooming
-preserves Follow. Waypoints, filters and tracking preferences are specific
-to the browser and origin.
+are discarded. The own position is derived from the game snapshot. Friend
+markers use the same name-based list as the local radar and update in all
+connected browsers. A valid heading is drawn as a short line. **Own heading**
+enables that line and Heading-Up for the own marker.
+
+**Player names (web tracking)** shares available in-game names with authorized
+browsers for the Tracking dropdown. The map markers for players and the own
+position have no text labels. Browsers can select any visible released player,
+including when the own position is unavailable. Players without a released name
+have a numbered entry. Tracking uses an opaque session ID. The chosen target
+stays selected if it temporarily disappears, and the camera resumes tracking
+when the same target returns. Loadouts, server details, credentials, process
+identifiers and memory addresses are omitted.
+
+Clicking a player marker selects it and enables Follow. The GPS button enables
+Follow for the selected target. Dragging disables Follow and leaves rotation
+enabled. Zooming preserves Follow. Follow, rotation and smoothing are
+independent settings. Waypoints, filters and tracking preferences are specific
+to the browser and origin. The target selection is specific to the tab.
 
 Static maps are available independently of live releases. The map list
 contains local PNG/JPEG files whose basenames are valid map IDs and have
@@ -92,6 +108,21 @@ package is added.
 
 ### Optional Cloudflare Tunnel
 
+For a test without a domain, use a recent `cloudflared` with `--allowed-mail`
+support and Node.js. Start the current build, enable the Webmap, then run
+`node tools/webmap-cloudflare.mjs 8765` (use the port shown in the app). Set
+`HIRSCHGANG_TEST_EMAIL` to the invited address and, if needed,
+`HIRSCHGANG_CLOUDFLARED` to the full path of `cloudflared.exe` before running
+the command. Open the printed URL and complete the email-code login.
+This forwards the running Webmap's assets and WebSocket data, including its
+current release settings. The Webmap and relay each listen on loopback.
+Close the tunnel with Ctrl+C when the test is finished.
+
+`--public-test` opens an unauthenticated test link for 30 minutes. The
+Webmap release settings determine which live data everyone with the link can see.
+
+For a fixed hostname, use a named tunnel.
+
 1. Install cloudflared using the official Windows instructions and add the
    intended domain to your Cloudflare account. Run `cloudflared tunnel login`
    and `cloudflared tunnel create hirschgangware-webmap`.
@@ -116,8 +147,8 @@ The hostname route requires an Access assertion header, but the origin does
 not validate its signature itself. The example uses cloudflared's
 `originRequest.access.required` with the correct AUD to enforce validation.
 Keep that enabled on the whole hostname. Do not open a router port, set up
-another reverse proxy that injects the header, or use a Quick Tunnel for
-released data. Store the tunnel credential outside the repository.
+another reverse proxy that injects the header. Store the tunnel credential
+outside the repository.
 
 [Cloudflare Tunnel setup](https://developers.cloudflare.com/tunnel/features/locally-managed-tunnels/create-local-tunnel/)
 · [Access for public hostnames](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/)
@@ -142,6 +173,14 @@ released data. Store the tunnel credential outside the repository.
 
 
 ## Verification
+
+Run `tests\build_webmap_test.bat` and `node tests/webmap_browser.mjs` from the
+repository root for the Tracking browser test. Set `WEBMAP_TEST_CHROME` to the
+Chrome executable if it is installed elsewhere. The test opens two isolated
+headless browser profiles against the local fixture. It checks the dropdown,
+nameless map markers, heading lines, independent tracking settings, reconnect,
+and friend color changes using simulated snapshots. A live game session is
+required to verify the corresponding DMA data.
 
 - x64 build via the Windows SDK and MSVC build script.
 - `node tests/webmap.mjs` checks image/world conversion in both directions,

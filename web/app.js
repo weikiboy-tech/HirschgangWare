@@ -1,11 +1,12 @@
 import { Camera, clamp, headingOnMap, radians, screenPoint, worldPoint } from "./map.js";
-import { LiveConnection, layers } from "./live.js";
+import { LiveConnection, layers, trackingTargets, validPlayerId } from "./live.js";
 
 const $ = id => document.getElementById(id);
 const canvas = $("canvas"), ctx = canvas.getContext("2d");
 const defaults = { follow: false, rotate: false, smooth: true, duration: 120, places: true, labels: true,
   grid: false, waypoints: true, markerSize: 7, autoMap: true, sidebar: null, map: "", filters: {}, points: [] };
 const storageKey = "hirschgangware.webmap.v1";
+const targetKey = storageKey + ".target";
 function savedSettings() {
   try { return JSON.parse(localStorage.getItem(storageKey)) ?? {}; } catch { return {}; }
 }
@@ -27,6 +28,11 @@ function save() {
 let maps = [], selected = null, raster = null, places = [], live = null, status = "connecting";
 let width = 0, height = 0, ratio = 1, raf = null, lastDraw = 0, adding = false;
 let loading = 0, catalogPromise = null, lastCatalog = 0, firstFit = true;
+let trackingId = "own", trackedMarkerId = null, targets = new Map(), targetOptions = "";
+try {
+  const savedTarget = sessionStorage.getItem(targetKey);
+  if (validPlayerId(savedTarget)) trackingId = savedTarget;
+} catch { /* Storage may be disabled. */ }
 const camera = new Camera(value => { $("follow").checked = prefs.follow = value; save(); redraw(); });
 camera.follow = prefs.follow;
 camera.rotate = prefs.rotate;
@@ -35,8 +41,15 @@ camera.milliseconds = prefs.duration;
 
 const layerNames = { players: "Spieler", infected: "Infizierte", animals: "Tiere", vehicles: "Fahrzeuge", loot: "Beute" };
 const colors = { players: "#fb8d9d", infected: "#faaf67", animals: "#d5b1fc", vehicles: "#a8c8fe", loot: "#e7d28c" };
+const friendColor = "#3cff8c";
+const trackingOrder = new Intl.Collator("de", { numeric: true });
 const matchLive = () => live && selected && live.map === selected.id;
 const pointsOnMap = () => prefs.points.filter(p => p.map === selected?.id);
+function trackingLabel(id) {
+  const player = targets.get(id);
+  if (id === "own") return player?.name ? player.name + " (eigene Position)" : "Eigene Position";
+  return player?.name || "Spieler " + id.split("-")[1];
+}
 
 function bounds() {
   const min = selected && width && height ? Math.min(width, height) / selected.size * .4 : .001;
@@ -108,52 +121,37 @@ function label(name, x, y, color = "#ecf3f3", declutter = false) {
   ctx.fillText(name, x, y);
 }
 
-function marker(p, radius, color, name, heading, sideLabel = false) {
+function marker(p, radius, color, name, tracked = false) {
   const s = screenPoint(p, camera, width, height);
   if (s.x < -60 || s.y < -60 || s.x > width + 60 || s.y > height + 60) return;
+  const direction = Number.isFinite(p.heading) ? radians(headingOnMap(p.heading, camera.angle)) : null;
   ctx.save();
   ctx.translate(s.x, s.y);
-  ctx.strokeStyle = "#09141b";
+  if (direction !== null) {
+    ctx.save();
+    ctx.rotate(direction);
+    ctx.beginPath();
+    ctx.moveTo(0, -radius - 2);
+    ctx.lineTo(0, -radius - 19);
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "#09141b";
+    ctx.lineWidth = 5;
+    ctx.stroke();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    ctx.restore();
+  }
+  ctx.strokeStyle = tracked ? "#eafcf8" : "#09141b";
   ctx.lineWidth = 2;
   ctx.fillStyle = color;
   ctx.beginPath();
-  if (Number.isFinite(heading)) {
-    ctx.rotate(radians(headingOnMap(heading, camera.angle)));
-    ctx.moveTo(0, -radius * 1.65);
-    ctx.lineTo(radius, radius);
-    ctx.lineTo(0, radius * .6);
-    ctx.lineTo(-radius, radius);
-    ctx.closePath();
-  } else {
-    ctx.arc(0, 0, radius, 0, Math.PI * 2);
-  }
+  ctx.arc(0, 0, radius, 0, Math.PI * 2);
   ctx.fill(); ctx.stroke(); ctx.restore();
-  if (name && prefs.labels) label(name, sideLabel ? s.x + radius + 42 : s.x, sideLabel ? s.y + 4 : s.y - radius - 5, color);
-}
-
-function playerDirection(p, radius) {
-  if (!Number.isFinite(p.heading)) return;
-  const s = screenPoint(p, camera, width, height);
-  if (s.x < -60 || s.y < -60 || s.x > width + 60 || s.y > height + 60) return;
-  const length = Math.max(17, radius * 3.5);
-  ctx.save();
-  ctx.translate(s.x, s.y);
-  ctx.rotate(radians(headingOnMap(p.heading, camera.angle)));
-  ctx.beginPath();
-  ctx.moveTo(0, -radius);
-  ctx.lineTo(0, -length);
-  ctx.moveTo(-4, -length + 5);
-  ctx.lineTo(0, -length);
-  ctx.lineTo(4, -length + 5);
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-  ctx.strokeStyle = "#09141b";
-  ctx.lineWidth = 4;
-  ctx.stroke();
-  ctx.strokeStyle = colors.players;
-  ctx.lineWidth = 2;
-  ctx.stroke();
-  ctx.restore();
+  if (name && prefs.labels) {
+    const below = direction !== null && Math.cos(direction) > 0;
+    label(name, s.x, s.y + (below ? radius + 15 : -radius - 5), color);
+  }
 }
 
 function compass() {
@@ -198,25 +196,67 @@ function draw(now) {
         if (prefs.filters[id] === false) continue;
         const radius = prefs.markerSize * .65;
         for (const p of dots) {
-          if (id === "players") playerDirection(p, radius);
-          marker(p, radius, colors[id], layerNames[id], undefined, id === "players");
+          const tracked = !!p.id && p.id === trackedMarkerId;
+          marker(tracked ? camera.marker : p, radius, p.friend ? friendColor : colors[id],
+            id === "players" ? null : layerNames[id], tracked);
         }
       }
-      if (camera.marker) marker(camera.marker, prefs.markerSize, "#65f1d3", "Eigene Position", camera.marker.heading);
+      if (live.me) marker(trackedMarkerId === "own" ? camera.marker : live.me, prefs.markerSize, "#65f1d3");
     }
     if (width > 130 && height > 180) compass();
   }
   raf = moving ? requestAnimationFrame(draw) : null;
 }
 
-function trackingUi() {
-  const marker = !!(matchLive() && live.me);
-  $("center").disabled = !marker;
-  const oriented = marker && Number.isFinite(live.me.heading);
+function syncTracking() {
+  targets = trackingTargets(matchLive() ? live : null, prefs.filters.players !== false);
+  const target = targets.get(trackingId);
+  const id = target ? trackingId : null;
+  if (trackedMarkerId !== id) camera.updateMarker(null);
+  trackedMarkerId = id;
+  camera.updateMarker(target ?? null);
+
+  const select = $("tracking-target");
+  const ids = ["own", ...[...targets.keys()].filter(id => id !== "own").sort((a, b) =>
+    trackingOrder.compare(trackingLabel(a), trackingLabel(b)) || a.localeCompare(b))];
+  const nameCounts = new Map();
+  for (const id of ids) {
+    const label = trackingLabel(id);
+    nameCounts.set(label, (nameCounts.get(label) ?? 0) + 1);
+  }
+  if (!ids.includes(trackingId)) ids.push(trackingId);
+  const options = ids.map(id => {
+    const player = targets.get(id), name = trackingLabel(id);
+    const label = name + (nameCounts.get(name) > 1 ? " #" + id.split("-")[1] : "") +
+      (player?.friend ? " · Freund" : "") + (!player ? " (nicht sichtbar)" : "");
+    return { id, label, disabled: !player };
+  });
+  const stamp = JSON.stringify(options);
+  if (stamp !== targetOptions) {
+    targetOptions = stamp;
+    select.replaceChildren(...options.map(({id, label, disabled}) => {
+      const option = document.createElement("option");
+      option.value = id;
+      option.disabled = disabled;
+      option.textContent = label;
+      return option;
+    }));
+  }
+  select.value = trackingId;
+  $("center").disabled = !target;
+  const oriented = Number.isFinite(target?.heading);
   $("orientation").textContent = prefs.rotate && oriented ? "Heading-Up" : "North-Up";
   $("tracking-status").textContent = prefs.autoMap && live?.map && !maps.some(m => m.id === live.map)
-    ? "Spielkarte " + live.map + " fehlt im Kartenordner." : !marker ? "Eigene Position nicht verfügbar." :
-    prefs.rotate && !oriented ? "Blickrichtung nicht freigegeben." : "";
+    ? "Spielkarte " + live.map + " fehlt im Kartenordner." : !target ? "Tracking-Ziel nicht sichtbar." :
+    prefs.rotate && !oriented ? (trackingId === "own" ? "Eigene Blickrichtung fehlt. Am Host „Own heading“ prüfen." :
+      "Blickrichtung des ausgewählten Spielers fehlt.") : "";
+}
+
+function pickTarget(id) {
+  trackingId = id;
+  try { sessionStorage.setItem(targetKey, id); } catch { /* Storage may be disabled. */ }
+  syncTracking();
+  redraw();
 }
 
 function selectedWaypoints() {
@@ -272,13 +312,12 @@ function setMap(id) {
   firstFit = true;
   fit();
   camera.updateMarker(null);
-  camera.updateMarker(matchLive() ? live.me : null);
   $("map-title").textContent = map?.id ?? "Karten";
   $("map-id").textContent = map?.id ?? "–";
   $("map-select").value = map?.id ?? "";
   $("map-message").textContent = map ? "Kartenbild wird geladen …" : "Keine Karte installiert.";
   $("add-waypoint").disabled = !map;
-  trackingUi(); matchPlaces(); selectedWaypoints(); redraw();
+  syncTracking(); matchPlaces(); selectedWaypoints(); redraw();
   const revision = ++loading;
   if (!map) return;
   prefs.map = map.id; save();
@@ -341,7 +380,7 @@ function updateLayers() {
     span.textContent = layerNames[id];
     input.type = "checkbox";
     input.checked = prefs.filters[id] !== false;
-    input.onchange = () => { prefs.filters[id] = input.checked; save(); redraw(); };
+    input.onchange = () => { prefs.filters[id] = input.checked; syncTracking(); save(); redraw(); };
     label.append(span, input); box.append(label);
   }
 }
@@ -359,7 +398,7 @@ function connectionState(state, reason) {
   if (state === "online" && changed) catalog(true);
   if (state !== "online" && changed) {
     live = null; lastPacket = "";
-    camera.updateMarker(null); trackingUi(); updateLayers(); redraw();
+    syncTracking(); updateLayers(); redraw();
   }
 }
 
@@ -373,8 +412,7 @@ function packet(update) {
     if (maps.some(m => m.id === update.map)) setMap(update.map);
     else catalog();
   }
-  camera.updateMarker(matchLive() ? update.me : null);
-  trackingUi(); updateLayers(); redraw();
+  syncTracking(); updateLayers(); redraw();
 }
 
 function adjustZoom(factor, at = { x: width / 2, y: height / 2 }) {
@@ -396,6 +434,7 @@ $("refresh").onclick = () => catalog(true);
 $("zoom-in").onclick = () => adjustZoom(1.35);
 $("zoom-out").onclick = () => adjustZoom(1 / 1.35);
 $("center").onclick = () => { if (camera.marker) camera.setFollow(true); };
+$("tracking-target").onchange = () => pickTarget($("tracking-target").value);
 $("fullscreen").onclick = async () => {
   try {
     if (document.fullscreenElement) await document.exitFullscreen();
@@ -430,7 +469,7 @@ for (const [id, key] of Object.entries({
       if (maps.some(m => m.id === live.map)) setMap(live.map);
       else catalog(true);
     }
-    trackingUi(); save(); redraw();
+    syncTracking(); save(); redraw();
   };
 }
 $("duration").value = prefs.duration;
@@ -498,10 +537,17 @@ function clickAt(p) {
       $("waypoints").checked = prefs.waypoints = true;
       save(); selectedWaypoints(); redraw();
     }
-  } else if (camera.marker) {
-    const s = screenPoint(camera.marker, camera, width, height);
-    if (Math.hypot(s.x - p.x, s.y - p.y) < Math.max(24, prefs.markerSize * 2))
+  } else {
+    let nearest = null, distance = Math.max(16, prefs.markerSize * 2);
+    for (const [id, target] of targets) {
+      const s = screenPoint(id === trackedMarkerId ? camera.marker : target, camera, width, height);
+      const gap = Math.hypot(s.x - p.x, s.y - p.y);
+      if (gap < distance) { nearest = id; distance = gap; }
+    }
+    if (nearest) {
+      pickTarget(nearest);
       camera.setFollow(true);
+    }
   }
 }
 function endPointer(e) {
@@ -522,7 +568,7 @@ canvas.addEventListener("keydown", e => {
   if (e.key === "+" || e.key === "-") { e.preventDefault(); adjustZoom(e.key === "+" ? 1.25 : .8); }
 });
 new ResizeObserver(resize).observe($("stage"));
-trackingUi();
+syncTracking();
 catalog(true);
 const url = new URL("/ws", location.href);
 url.protocol = location.protocol === "https:" ? "wss:" : "ws:";

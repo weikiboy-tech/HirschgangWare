@@ -7,8 +7,10 @@ namespace webmap {
 
 enum Release : unsigned {
     CurrentMap = 1, Own = 2, Heading = 4, Players = 8, Infected = 16,
-    Animals = 32, Vehicles = 64, Loot = 128
+    Animals = 32, Vehicles = 64, Loot = 128, PlayerNames = 256
 };
+constexpr unsigned AllReleases = CurrentMap | Own | Heading | Players | Infected | Animals |
+                                 Vehicles | Loot | PlayerNames;
 
 struct Options {
     bool enabled = false;

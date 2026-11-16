@@ -350,45 +350,40 @@ private:
 
     DWORD virtFlags() const { return VMMDLL_FLAG_NOCACHE | (noPaging_ && !pagingOk_ ? VMMDLL_FLAG_NOPAGING : 0); }
 
-    void resolveKeyboard(uint64_t now) {
-        if (now < remoteLookupAt_ || remoteUnsupported_) return;
-        remoteLookupAt_ = now + 3000;
-        if (!vmm_ || !remoteModule_ || !remoteProcesses_ || !remoteProcess_ || !remoteRegistry_) return;
+    bool prepareRemoteKeys() override {
+        // Called before the capture threads start. Resolving the bitmap scans whole
+        // executable sections and would monopolize the FPGA during live reads.
+        if (!vmm_ || !remoteModule_ || !remoteProcesses_ || !remoteProcess_ || !remoteRegistry_) return false;
 
         VMMDLL_PROCESS_INFORMATION game{};
         game.magic = VMMDLL_PROCESS_INFORMATION_MAGIC;
         game.wVersion = VMMDLL_PROCESS_INFORMATION_VERSION;
         game.wSize = sizeof game;
         SIZE_T size = sizeof game;
-        if (!remoteProcess_(vmm_, pid_, &game, &size) || !game.win.dwSessionId) return;
+        if (!remoteProcess_(vmm_, pid_, &game, &size) || !game.win.dwSessionId) return false;
 
         const dma_keyboard::Reader reader{vmm_, readEx_, remoteModule_, remoteProcesses_, memFree_, remoteRegistry_};
         try {
             const auto [build, revision] = reader.version();
             // Enable the undocumented bitmap only on the build exercised by the two-PC test.
-            if (build != 26200 || revision != 9711) {
-                remoteUnsupported_ = true;
-                return;
-            }
+            if (build != 26200 || revision != 9711) return false;
             remoteAddress_ = dma_keyboard::resolve(reader, game.win.dwSessionId);
         } catch (const std::exception&) {
             remoteAddress_ = {};
         }
+        return remoteAddress_.va != 0;
     }
 
     void pollKeyboard(uint64_t now) {
         const uint64_t requested = remoteRequestedAt_.load(std::memory_order_relaxed);
-        if (!requested || (now >= requested && now - requested >= 1000) ||
+        if (!remoteAddress_.va || !requested || (now >= requested && now - requested >= 1000) ||
             now - remoteLastPollAt_ < 8) return;
         remoteLastPollAt_ = now;
-        if (!remoteAddress_.va) resolveKeyboard(now);
-        if (!remoteAddress_.va) return;
 
         dma_keyboard::Sample sample{remoteAddress_.pid};
         DWORD got = 0;
         if (!readEx_(vmm_, sample.pid, remoteAddress_.va, sample.bits.data(), DWORD(sample.bits.size()), &got,
                      virtFlags() | VMMDLL_FLAG_NOCACHEPUT) || got != sample.bits.size()) {
-            remoteAddress_ = {};
             sample = {};
         }
         std::lock_guard<std::mutex> lock(remoteSampleMx_);
@@ -407,9 +402,7 @@ private:
 
     mutable std::atomic<uint64_t> remoteRequestedAt_{0};
     dma_keyboard::Address remoteAddress_;
-    uint64_t remoteLookupAt_ = 0;
     uint64_t remoteLastPollAt_ = 0;
-    bool remoteUnsupported_ = false;
     mutable std::mutex remoteSampleMx_;
     uint64_t remoteSampleAt_ = 0;
     dma_keyboard::Sample remoteSample_;
