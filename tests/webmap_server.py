@@ -121,6 +121,30 @@ def wire(payload, opcode):
 
 server = subprocess.Popen([str(ROOT / "build/webmap-test/server.exe"), str(STAGE), str(PORT)],
                           stdin=subprocess.PIPE, text=True)
+
+
+def released(command, predicate):
+    server.stdin.write(command + "\n")
+    server.stdin.flush()
+    for _ in range(12):
+        try:
+            _, sock, stream = websocket()
+            if sock is not None:
+                with sock, stream:
+                    for _ in range(5):
+                        if not stream.peek(1):
+                            break
+                        opcode, packet = frame(stream)
+                        if opcode == 1:
+                            snap = json.loads(packet)
+                            if predicate(snap):
+                                return snap, packet
+        except OSError:
+            pass
+        time.sleep(.04)
+    raise AssertionError(f"missing packet after {command}")
+
+
 try:
     wait_http()
     assert http("/")[0] == 200
@@ -215,9 +239,37 @@ try:
                     assert [p["id"] for p in players] == track_ids
                     assert snap["me"]["name"] == "private-name"
                     assert players[0]["friend"] is True
+                    assert "held" not in players[0] and "held" not in snap["me"]
                     break
             else:
                 raise AssertionError("missing released names")
+
+    snap, packet = released("events", lambda p: p["layers"].get("events") and p["layers"].get("players"))
+    assert snap["layers"]["events"] == [
+        {"x": 570, "z": 1020, "kind": "airdrop", "label": "Airdrop"},
+        {"x": 820, "z": 1020, "kind": "helicopter-crash", "label": "Helikopterabsturz"},
+        {"x": 700, "z": 1020, "kind": "loot-cluster", "label": "Loot-H\u00e4ufung"},
+    ]
+    assert snap["layers"]["players"][0]["held"] == "GZ_TestRifle"
+    assert snap["heldShared"] is True
+    assert snap["me"]["held"] == "OwnRifle"
+    assert "held" not in snap["layers"]["players"][1]
+    snap, _ = released("swap", lambda p: any(d.get("held") == "GZ_SecondRifle" for d in p["layers"].get("players", [])))
+    assert snap["layers"]["players"][0]["id"] == track_ids[0]
+    snap, _ = released("empty", lambda p: p["layers"].get("events") and p["layers"].get("players")
+                       and "held" not in p["layers"]["players"][0])
+    assert snap["me"]["held"] == "OwnRifle"
+    released("swap", lambda p: any(d.get("held") == "GZ_SecondRifle" for d in p["layers"].get("players", [])))
+    snap, packet = released("names", lambda p: p["layers"].get("players") and "events" not in p["layers"])
+    assert snap["heldShared"] is False
+    assert b'"held"' not in packet and b"GZ_SecondRifle" not in packet and b'"events"' not in packet
+    snap, packet = released("held", lambda p: p["layers"].get("players") and not p["layers"]["players"][0].get("name"))
+    assert "name" not in snap["me"] and b"private-player" not in packet
+    assert snap["layers"]["players"][0]["held"] == "GZ_SecondRifle"
+    released("events", lambda p: p["layers"].get("events"))
+    snap, _ = released("mapchange", lambda p: p["map"] == "different")
+    assert snap["layers"]["events"] == []
+    released("maphome", lambda p: p["map"] == "chernarusplus")
 
     server.stdin.write("off\n")
     server.stdin.flush()

@@ -196,6 +196,11 @@ void appendPlayerName(std::ostream& out, const Options& opt, const std::string& 
         out << ",\"name\":" << json(name);
 }
 
+void appendHeld(std::ostream& out, const Options& opt, const std::string& held) {
+    if (opt.shares(PlayerHeld) && !held.empty() && held.size() <= 80)
+        out << ",\"held\":" << json(held);
+}
+
 const std::string& trackingSession() {
     static const auto id = [] {
         unsigned char bytes[8]{};
@@ -225,6 +230,7 @@ std::string packet(const Options& opt, const std::shared_ptr<const Snapshot>& sn
         out << "{\"x\":" << fr.meX << ",\"z\":" << fr.meZ;
         if (opt.shares(Heading)) appendHeading(out, fr.fwdX, fr.fwdZ);
         appendPlayerName(out, opt, fr.meName);
+        appendHeld(out, opt, fr.meHeld);
         out << '}';
     } else {
         out << "null";
@@ -245,6 +251,7 @@ std::string packet(const Options& opt, const std::shared_ptr<const Snapshot>& sn
             if (d.icon == radar::Icon::Survivor) {
                 appendHeading(out, d.fwdX, d.fwdZ);
                 appendPlayerName(out, opt, d.name);
+                appendHeld(out, opt, d.held);
                 if (d.webFriend) out << ",\"friend\":true";
                 if (d.webTrackId && !trackingSession().empty())
                     out << ",\"id\":\"" << trackingSession() << '-' << d.webTrackId << '"';
@@ -254,7 +261,25 @@ std::string packet(const Options& opt, const std::shared_ptr<const Snapshot>& sn
         }
         out << ']';
     }
-    out << "}}";
+    if (!map.empty() && opt.shares(Events)) {
+        if (!firstLayer) out << ',';
+        out << "\"events\":[";
+        unsigned count = 0;
+        if (snap->frame.events) for (const auto& event : *snap->frame.events) {
+            if (!inside(event.pos.x, event.pos.z, snap->frame.mapSize)) continue;
+            if (count++) out << ',';
+            out << "{\"x\":" << event.pos.x << ",\"z\":" << event.pos.z
+                << ",\"kind\":" << json(radar_event::key(event.kind))
+                << ",\"label\":" << json(radar_event::label(event.kind)) << '}';
+            if (count == radar_event::kMaxMarkers) break;
+        }
+        out << ']';
+    }
+    out << '}';
+    if (!map.empty()) {
+        out << ",\"heldShared\":" << (opt.shares(PlayerHeld) && (opt.shares(Own) || opt.shares(Players)) ? "true" : "false");
+    }
+    out << '}';
     return out.str();
 }
 

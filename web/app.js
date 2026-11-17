@@ -1,9 +1,10 @@
 import { Camera, clamp, headingOnMap, radians, screenPoint, worldPoint } from "./map.js";
-import { LiveConnection, layers, trackingTargets, validPlayerId } from "./live.js";
+import { LiveConnection, layers, playerLines, trackingTargets, validPlayerId } from "./live.js";
 
 const $ = id => document.getElementById(id);
 const canvas = $("canvas"), ctx = canvas.getContext("2d");
 const defaults = { follow: false, rotate: false, smooth: true, duration: 120, places: true, labels: true,
+  playerNames: true, heldItems: true,
   grid: false, waypoints: true, markerSize: 7, autoMap: true, sidebar: null, map: "", filters: {}, points: [] };
 const storageKey = "hirschgangware.webmap.v1";
 const targetKey = storageKey + ".target";
@@ -11,7 +12,7 @@ function savedSettings() {
   try { return JSON.parse(localStorage.getItem(storageKey)) ?? {}; } catch { return {}; }
 }
 const stored = savedSettings(), prefs = { ...defaults };
-for (const key of ["follow", "rotate", "smooth", "places", "labels", "grid", "waypoints", "autoMap", "sidebar"]) {
+for (const key of ["follow", "rotate", "smooth", "places", "labels", "playerNames", "heldItems", "grid", "waypoints", "autoMap", "sidebar"]) {
   if (typeof stored[key] === "boolean") prefs[key] = stored[key];
 }
 if (Number.isFinite(stored.duration)) prefs.duration = clamp(stored.duration, 40, 600);
@@ -39,7 +40,7 @@ camera.rotate = prefs.rotate;
 camera.smooth = prefs.smooth;
 camera.milliseconds = prefs.duration;
 
-const layerNames = { players: "Spieler", infected: "Infizierte", animals: "Tiere", vehicles: "Fahrzeuge", loot: "Beute" };
+const layerNames = { players: "Spieler", infected: "Infizierte", animals: "Tiere", vehicles: "Fahrzeuge", loot: "Beute", events: "Events" };
 const colors = { players: "#fb8d9d", infected: "#faaf67", animals: "#d5b1fc", vehicles: "#a8c8fe", loot: "#e7d28c" };
 const friendColor = "#3cff8c";
 const trackingOrder = new Intl.Collator("de", { numeric: true });
@@ -150,8 +151,29 @@ function marker(p, radius, color, name, tracked = false) {
   ctx.fill(); ctx.stroke(); ctx.restore();
   if (name && prefs.labels) {
     const below = direction !== null && Math.cos(direction) > 0;
-    label(name, s.x, s.y + (below ? radius + 15 : -radius - 5), color);
+    const lines = Array.isArray(name) ? name : [name];
+    const y = s.y + (below ? radius + 15 : -radius - 5 - (lines.length - 1) * 14);
+    lines.forEach((line, index) => label(line, s.x, y + index * 14, color));
   }
+}
+
+function eventMarker(event) {
+  const p = screenPoint(event, camera, width, height);
+  if (p.x < -24 || p.y < -24 || p.x > width + 24 || p.y > height + 24) return;
+  const r = Math.max(6, prefs.markerSize);
+  const color = event.kind === "loot-cluster" ? "#ffd380" : "#ffa869";
+  ctx.beginPath();
+  ctx.moveTo(p.x, p.y - r);
+  ctx.lineTo(p.x + r, p.y);
+  ctx.lineTo(p.x, p.y + r);
+  ctx.lineTo(p.x - r, p.y);
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.strokeStyle = "#09141b";
+  ctx.lineWidth = 2;
+  ctx.fill();
+  ctx.stroke();
+  if (prefs.labels) label(event.label, p.x, p.y - r - 5, color);
 }
 
 function compass() {
@@ -193,15 +215,17 @@ function draw(now) {
     if (prefs.waypoints) for (const p of pointsOnMap()) marker(p, 5, "#f7d466", p.name);
     if (matchLive()) {
       for (const [id, dots] of Object.entries(live.layers)) {
-        if (prefs.filters[id] === false) continue;
+        if (id === "events" || prefs.filters[id] === false) continue;
         const radius = prefs.markerSize * .65;
         for (const p of dots) {
           const tracked = !!p.id && p.id === trackedMarkerId;
           marker(tracked ? camera.marker : p, radius, p.friend ? friendColor : colors[id],
-            id === "players" ? null : layerNames[id], tracked);
+            id === "players" ? playerLines(p, live.me, prefs) : layerNames[id], tracked);
         }
       }
-      if (live.me) marker(trackedMarkerId === "own" ? camera.marker : live.me, prefs.markerSize, "#65f1d3");
+      if (live.me) marker(trackedMarkerId === "own" ? camera.marker : live.me, prefs.markerSize, "#65f1d3",
+        playerLines(live.me, null, prefs));
+      if (prefs.filters.events !== false) for (const event of live.layers.events ?? []) eventMarker(event);
     }
     if (width > 130 && height > 180) compass();
   }
@@ -369,6 +393,15 @@ function catalog(force = false) {
 }
 
 function updateLayers() {
+  const held = $("held-status");
+  const hasPlayers = live?.me || live?.layers.players;
+  const missing = live?.heldShared === false;
+  const legacy = hasPlayers && live.heldShared === undefined &&
+    !live.me?.held && !live.layers.players?.some(player => player.held);
+  held.hidden = !(prefs.labels && prefs.heldItems && hasPlayers && (missing || legacy));
+  held.textContent = held.hidden ? "" : missing
+    ? "Waffenanzeige: Am Host unter Map → Webmap „Held items“ freigeben."
+    : "Falls Waffen fehlen: Am Host unter Map → Webmap „Held items“ prüfen.";
   const box = $("released"), list = Object.keys(live?.layers ?? {});
   const stamp = list.join(",");
   if (box.dataset.layers === stamp) return;
@@ -457,7 +490,7 @@ $("add-waypoint").onclick = () => {
 
 for (const [id, key] of Object.entries({
   "auto-map": "autoMap", follow: "follow", rotate: "rotate", smooth: "smooth", places: "places",
-  labels: "labels", grid: "grid", waypoints: "waypoints"
+  labels: "labels", "player-names": "playerNames", "held-items": "heldItems", grid: "grid", waypoints: "waypoints"
 })) {
   $(id).checked = prefs[key];
   $(id).onchange = () => {
@@ -469,7 +502,7 @@ for (const [id, key] of Object.entries({
       if (maps.some(m => m.id === live.map)) setMap(live.map);
       else catalog(true);
     }
-    syncTracking(); save(); redraw();
+    syncTracking(); updateLayers(); save(); redraw();
   };
 }
 $("duration").value = prefs.duration;

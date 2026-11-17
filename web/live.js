@@ -1,11 +1,18 @@
-export const layers = ["players", "infected", "animals", "vehicles", "loot"];
+export const layers = ["players", "infected", "animals", "vehicles", "loot", "events"];
+const eventKinds = ["airdrop", "helicopter-crash", "loot-cluster"];
 const validId = id => typeof id === "string" && /^[a-z0-9_-]{1,48}$/.test(id);
 const validPoint = p => p && Number.isFinite(p.x) && Number.isFinite(p.z) &&
   p.x >= 0 && p.z >= 0 && p.x <= 100000 && p.z <= 100000;
 
 const validHeading = value => value === undefined || (Number.isFinite(value) && Math.abs(value) <= 360);
 export const validPlayerId = id => typeof id === "string" && /^[0-9a-f]{16}-[1-9][0-9]{0,9}$/.test(id);
-const playerName = name => typeof name === "string" && name.length <= 80 ? name : undefined;
+const shortText = value => typeof value === "string" && value.length > 0 && value.length <= 80 ? value : undefined;
+
+export function playerLines(player, me, { playerNames = true, heldItems = true } = {}) {
+  const name = playerNames ? player.name : undefined;
+  const distance = name && me ? "  " + Math.round(Math.hypot(player.x - me.x, player.z - me.z)) + "m" : "";
+  return [name ? name + distance : undefined, heldItems ? player.held : undefined].filter(Boolean);
+}
 
 export function trackingTargets(snapshot, showPlayers) {
   const players = showPlayers ? snapshot?.layers.players ?? [] : [];
@@ -16,7 +23,7 @@ export function trackingTargets(snapshot, showPlayers) {
 }
 
 export function decode(raw) {
-  if (typeof raw !== "string" || raw.length > 192 * 1024) return null;
+  if (typeof raw !== "string" || raw.length > 320 * 1024) return null;
   let p;
   try { p = JSON.parse(raw); } catch { return null; }
   if (!p || p.v !== 1 || typeof p.live !== "boolean" || (p.map !== null && !validId(p.map)) ||
@@ -27,12 +34,18 @@ export function decode(raw) {
   for (const key of Object.keys(p.layers)) {
     const dots = p.layers[key];
     if (!layers.includes(key) || !Array.isArray(dots) || dots.length > 512 || !dots.every(validPoint)) return null;
+    if (key === "events") {
+      if (dots.length > 128 || !dots.every(e => eventKinds.includes(e.kind) && shortText(e.label))) return null;
+      safe.events = dots.map(({x, z, kind, label}) => ({x, z, kind, label}));
+      continue;
+    }
     const playerIds = new Set();
-    safe[key] = dots.map(({x, z, category, heading, id, name, friend}) => ({
+    safe[key] = dots.map(({x, z, category, heading, id, name, held, friend}) => ({
       x, z, category: Number.isInteger(category) ? category : null,
       heading: key === "players" ? heading : undefined,
       id: key === "players" ? id : undefined,
-      name: key === "players" ? playerName(name) : undefined,
+      name: key === "players" ? shortText(name) : undefined,
+      held: key === "players" ? shortText(held) : undefined,
       friend: key === "players" && friend === true,
     }));
     if (key === "players") {
@@ -44,8 +57,10 @@ export function decode(raw) {
       }
     }
   }
-  const me = p.me === null ? null : { x: p.me.x, z: p.me.z, heading: p.me.heading, name: playerName(p.me.name) };
-  return { live: p.live, map: p.map, me, layers: safe };
+  const me = p.me === null ? null : { x: p.me.x, z: p.me.z, heading: p.me.heading,
+    name: shortText(p.me.name), held: shortText(p.me.held) };
+  const heldShared = typeof p.heldShared === "boolean" ? p.heldShared : undefined;
+  return { live: p.live, map: p.map, me, layers: safe, heldShared };
 }
 
 export class LiveConnection {

@@ -50,7 +50,8 @@ webmap_public_host=
 
 Release bits are 1 current map, 2 own position, 4 own heading, 8 player
 positions with headings and friend markers, 16 infected, 32 animals, 64 vehicles,
-128 loot, and 256 player names for the Tracking menu. For example,
+128 loot, 256 player names, 512 held items, and 1024 events. Existing bit
+values keep their meaning. For example,
 `webmap_release=7` publishes the current map and own marker with heading.
 The map bit is required for all live data, and own position is required for
 heading. Loot also requires the local loot reader and respects its category
@@ -61,9 +62,17 @@ markers use the same name-based list as the local radar and update in all
 connected browsers. A valid heading is drawn as a short line. **Own heading**
 enables that line and Heading-Up for the own marker.
 
-**Player names (web tracking)** shares available in-game names with authorized
-browsers for the Tracking dropdown. The map markers for players and the own
-position have no text labels. Browsers can select any visible released player,
+**Player names** shares available in-game names with authorized browsers for
+the Tracking dropdown and marker captions. **Held items** independently shares
+the same held-item names used by the desktop radar. The browser's **Labels**
+switch controls all captions. **Spielernamen auf Karte** and **Waffen auf
+Karte** independently control the two player lines and are saved per browser.
+The tracking dropdown still uses the names shared by the host. A hint in the
+sidebar identifies a missing **Held items** host release when weapon labels are
+selected. The first line adds horizontal distance
+when Own position is shared, and the second line disappears with empty hands.
+Revoking either host release omits that field from subsequent packets. Browsers
+can select any visible released player,
 including when the own position is unavailable. Players without a released name
 have a numbered entry. Tracking uses an opaque session ID. The chosen target
 stays selected if it temporarily disappears, and the camera resumes tracking
@@ -75,6 +84,42 @@ Follow for the selected target. Dragging disables Follow and leaves rotation
 enabled. Zooming preserves Follow. Follow, rotation and smoothing are
 independent settings. Waypoints, filters and tracking preferences are specific
 to the browser and origin. The target selection is specific to the tab.
+
+### Shared map events
+
+Use **Display → Events** to enable event markers on the desktop map.
+For browser guests, enable **Map → Webmap → Events**, then use the browser's
+**Events** layer switch. It is possible to share events with the desktop
+radar window closed and with the ordinary loot layer turned off. Both
+maps consume the same event snapshot and project its world X/Z coordinates
+using their existing map scale.
+
+Named events match exact class names from the observed loot and near/far
+object tables. Expansion's documented Airdrop container variants produce
+**Airdrop**. The Central Economy wrecks `Wreck_UH1Y` and
+`Wreck_Mi8_Crashed` produce **Helikopterabsturz**. This requires an observed
+readable class and position. Catalog or mission configuration alone cannot
+locate an active event. Named markers follow subsequent position samples and
+expire after three seconds without a fresh observation.
+
+**Loot-Häufung** is a heuristic based on the complete loot snapshots before
+web filtering and the per-layer cap. At least eight new objects must appear
+within eight seconds and 25 metres of a candidate in a consistently observed
+area near the player. Initial snapshots and repeated identities add no
+new objects. Snapshots with unreadable loot tables cannot create a cluster.
+A nearby confirmed event replaces the cluster marker. Clusters expire when
+fewer than four contributing objects remain observed, or after 90 seconds.
+Confirmed and heuristic markers reset on a session, world or selected map change.
+
+The local session logs include `chernarusplus`, with a bundled 15360 m map.
+Ground Zero's exact custom event mapping still needs a capture from that
+server with the world ID, timestamp, exact crate or event class, world X/Z,
+and which observed object table contained it. A before/during/after sample
+at a known drop location would also validate detection and removal.
+
+- [DayZ Expansion AirdropSettings](https://github.com/salutesh/DayZ-Expansion-Scripts/wiki/%5BServer-Hosting%5D-AirdropSettings)
+- [Bohemia Chernarus Central Economy events](https://github.com/BohemiaInteractive/DayZ-Central-Economy/blob/master/dayzOffline.chernarusplus/db/events.xml)
+- [Bohemia Livonia Central Economy events](https://github.com/BohemiaInteractive/DayZ-Central-Economy/blob/master/dayzOffline.enoch/db/events.xml)
 
 Static maps are available independently of live releases. The map list
 contains local PNG/JPEG files whose basenames are valid map IDs and have
@@ -178,7 +223,8 @@ Run `tests\build_webmap_test.bat` and `node tests/webmap_browser.mjs` from the
 repository root for the Tracking browser test. Set `WEBMAP_TEST_CHROME` to the
 Chrome executable if it is installed elsewhere. The test opens two isolated
 headless browser profiles against the local fixture. It checks the dropdown,
-nameless map markers, heading lines, independent tracking settings, reconnect,
+map names and held-item changes during Follow, event positions, layer and
+label switches, release revocation, map changes, heading lines, reconnect,
 and friend color changes using simulated snapshots. A live game session is
 required to verify the corresponding DMA data.
 

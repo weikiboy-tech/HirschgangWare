@@ -3,10 +3,13 @@
 #include <windows.h>
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "loot.h"
+#include "radar_events.h"
+#include "crosshair.h"
 #include "webmap.h"
 
 namespace radar {
@@ -23,6 +26,7 @@ struct Dot {
     float fwdX = 0, fwdZ = 0;
     std::string label;
     std::string name;  // clean player name (survivors only) for friend toggling
+    std::string held;
     uint32_t webTrackId = 0;
     bool webFriend = false;
 };
@@ -45,9 +49,11 @@ struct Frame {
     float meX = 0, meZ = 0;
     float fwdX = 0, fwdZ = 0;
     std::string meName;
+    std::string meHeld;
     std::string mapBase;
     float mapSize = 15360;
     std::vector<Dot> dots;
+    std::shared_ptr<const std::vector<radar_event::Marker>> events;
     std::vector<Place> places;
     std::vector<Online> online;
 };
@@ -60,6 +66,7 @@ struct Config {
     bool vehicles = true;
     bool infected = true;
     bool names = true;
+    bool events = false;
     bool headings = true;
     int headingLen = 150;
     int lootLabelRange = 250;
@@ -92,7 +99,9 @@ struct Config {
         int minimapSize = 200;
         int range = 1000;
         bool crosshair = true;
-        int crosshairSize = 10;
+        int crosshairSize = 5;
+        crosshair::Style crosshairStyle = crosshair::Style::Plus;
+        COLORREF crosshairColor = crosshair::kDefaultColor;
     } esp;
     webmap::Options webmap;
     bool webmapChanged = false;

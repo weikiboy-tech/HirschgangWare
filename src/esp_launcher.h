@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "crosshair.h"
 #include "webmap.h"
 
 struct EspSettings {
@@ -46,6 +47,7 @@ struct EspSettings {
     int dzRadarZoom = 600;
     bool dzInfected = true;
     bool dzRadarNames = true;
+    bool dzRadarEvents = false;
     int dzRadarLootLabel = 250;
     float dzRadarMarker = 1.0f;
     unsigned dzLootCats = 0x7FFF;
@@ -55,7 +57,9 @@ struct EspSettings {
     std::string dzFilterList;
     webmap::Options webmap;
     bool crosshair = true;
-    int crosshairSize = 10;
+    int crosshairSize = 5;
+    crosshair::Style crosshairStyle = crosshair::Style::Plus;
+    COLORREF crosshairColor = crosshair::kDefaultColor;
 };
 
 struct DisplayInfo {

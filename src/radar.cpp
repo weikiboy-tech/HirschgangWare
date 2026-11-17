@@ -863,6 +863,19 @@ void drawRadar(const Frame& f, Config& cfg, const Counts& n) {
         dl->AddText(gFont, 13.f, L.at, th::Text, L.text->c_str());
     }
 
+    if (cfg.events && f.events) for (const auto& event : *f.events) {
+        if (!radar_event::valid(event.pos) || event.pos.x > M || event.pos.z > M) continue;
+        const float px = sx(event.pos.x), py = sy(event.pos.z);
+        if (px < left || px >= w || py < 0 || py >= h) continue;
+        const float r = 9.f * scale;
+        const ImVec2 diamond[] = {{px, py - r}, {px + r, py}, {px, py + r}, {px - r, py}};
+        const ImU32 col = event.kind == radar_event::Kind::LootCluster ? IM_COL32(255, 211, 128, 255) : IM_COL32(255, 168, 105, 255);
+        dl->AddConvexPolyFilled(diamond, 4, col);
+        dl->AddPolyline(diamond, 4, th::Edge, ImDrawFlags_Closed, 2.f);
+        if (cfg.names)
+            haloText(dl, gBold, 13.f, ImVec2(px + r + 5.f, py - 7.f), col, radar_event::label(event.kind));
+    }
+
     float fx = f.fwdX, fz = f.fwdZ;
     const float fl = std::sqrt(fx * fx + fz * fz);
     if (fl > 1e-3f) {
@@ -1056,10 +1069,15 @@ bool toggleSwitch(const char* id, bool* v) {
     return clicked;
 }
 
-bool switchRow(const char* label, bool* v) {
+bool switchRow(const char* label, bool* v, const char* popup = nullptr) {
     const float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(label);
+    if (popup) {
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Edit##crosshair")) ImGui::OpenPopup(popup);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", popup);
+    }
     ImGui::SameLine(right - 32.f);
     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 2.f);
     ImGui::PushID(label);
@@ -1412,13 +1430,15 @@ void drawTriggerWindow(bool& ch) {
         }
 
         section("LIVE");
+        if (switchRow("Click output", &tc.enabled)) trigger::touch();
         const trigger::Live& lv = trigger::live();
         ImGui::Text("key: %s", lv.keyHeld ? "HELD" : "-");
         ImGui::SameLine();
-        ImGui::TextDisabled("clicks: %d", lv.clicks);
-        ImGui::Text("target under crosshair: %s", lv.target ? "yes" : "no");
+        ImGui::TextDisabled("clicks sent: %d", lv.clicks);
+        ImGui::Text("target under crosshair: %s", !lv.projectionReady ? "camera unavailable" : (lv.target ? "yes" : "no"));
         if (lv.target) ImGui::TextDisabled("%s  %.0f m  %.0f px   held %d ms", trigger::boneName(lv.bone), lv.dist, lv.px, lv.heldMs);
         if (!lv.note.empty()) ImGui::TextDisabled("%s", lv.note.c_str());
+        if (!lv.clickStatus.empty()) ImGui::TextWrapped("%s", lv.clickStatus.c_str());
         if (chip("Test click##mtc", false, ImGui::GetContentRegionAvail().x)) trigger::clickOnce();
 
         section("COMMANDS (advanced)");
@@ -1494,11 +1514,37 @@ void drawSettingsBody(Config& cfg, const Counts& n, bool live, const std::vector
             ImGui::PopItemWidth();
         }
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("size of the corner minimap");
-        ch |= switchRow("Crosshair", &e.crosshair);
-        if (e.crosshair) {
-            ImGui::PushItemWidth(-1);
-            ch |= ImGui::SliderInt("##xhair", &e.crosshairSize, 4, 40, "size %d px");
-            ImGui::PopItemWidth();
+        ch |= switchRow("Crosshair", &e.crosshair, "Crosshair settings");
+        if (ImGui::BeginPopup("Crosshair settings")) {
+            ImGui::TextUnformatted("Overlay crosshair");
+            const ImVec2 pos = ImGui::GetCursorScreenPos();
+            const LONG x = LONG(std::floor(pos.x)), y = LONG(std::floor(pos.y));
+            const RECT preview{x, y, x + 200, y + 64};
+            ImDrawList* previewDraw = ImGui::GetWindowDrawList();
+            previewDraw->AddRectFilled(ImVec2(float(preview.left), float(preview.top)),
+                              ImVec2(float(preview.right), float(preview.bottom)), IM_COL32(78, 85, 91, 255), 5.f);
+            crosshair::draw(preview, e.crosshairStyle, e.crosshairSize, e.crosshairColor,
+                [&](const RECT& r, COLORREF c) {
+                    previewDraw->AddRectFilled(ImVec2(float(r.left), float(r.top)), ImVec2(float(r.right), float(r.bottom)),
+                                      IM_COL32(GetRValue(c), GetGValue(c), GetBValue(c), 255));
+                });
+            ImGui::Dummy(ImVec2(200.f, 64.f));
+            int style = int(e.crosshairStyle);
+            const char* const styles[] = {"Plus", "Ring", "Dot"};
+            ImGui::SetNextItemWidth(134.f);
+            if (ImGui::Combo("Shape", &style, styles, IM_ARRAYSIZE(styles))) {
+                e.crosshairStyle = crosshair::Style(style);
+                ch = true;
+            }
+            ImGui::SetNextItemWidth(134.f);
+            ch |= ImGui::SliderInt("Size", &e.crosshairSize, crosshair::kMinSize, crosshair::kMaxSize);
+            float rgb[]{GetRValue(e.crosshairColor) / 255.f, GetGValue(e.crosshairColor) / 255.f, GetBValue(e.crosshairColor) / 255.f};
+            ImGui::SetNextItemWidth(134.f);
+            if (ImGui::ColorEdit3("Color", rgb, ImGuiColorEditFlags_DisplayHex | ImGuiColorEditFlags_Uint8)) {
+                e.crosshairColor = RGB(int(rgb[0] * 255.f + 0.5f), int(rgb[1] * 255.f + 0.5f), int(rgb[2] * 255.f + 0.5f));
+                ch = true;
+            }
+            ImGui::EndPopup();
         }
 
         int v = std::clamp(e.range, 25, kMaxRange);
@@ -1679,6 +1725,7 @@ void drawSettingsBody(Config& cfg, const Counts& n, bool live, const std::vector
     ImGui::TextDisabled("Marker size");
     ch |= ImGui::SliderFloat("##marker", &cfg.markerScale, 0.5f, 2.5f, "%.1fx");
     ch |= switchRow("Labels", &cfg.names);
+    ch |= switchRow("Events", &cfg.events);
     ImGui::BeginDisabled(!cfg.names);
     ImGui::TextDisabled("Label loot within");
     ch |= ImGui::SliderInt("##lootlab", &cfg.lootLabelRange, 25, 2000, "%d m", ImGuiSliderFlags_Logarithmic);
@@ -1755,16 +1802,16 @@ void drawSettingsBody(Config& cfg, const Counts& n, bool live, const std::vector
         constexpr Share shares[]{
             {"Publish current map", webmap::CurrentMap}, {"Own position", webmap::Own},
             {"Own heading", webmap::Heading}, {"Players (positions and friends)", webmap::Players},
-            {"Player names (web tracking)", webmap::PlayerNames},
+            {"Player names", webmap::PlayerNames}, {"Held items", webmap::PlayerHeld},
             {"Infected", webmap::Infected}, {"Animals", webmap::Animals},
-            {"Vehicles", webmap::Vehicles}, {"Loot (local filters apply)", webmap::Loot},
+            {"Vehicles", webmap::Vehicles}, {"Loot (local filters apply)", webmap::Loot}, {"Events", webmap::Events},
         };
         ImGui::TextUnformatted("Server-side releases");
         for (const auto& share : shares) {
             ImGui::PushID(int(share.bit));
             ImGui::BeginDisabled((share.bit != webmap::CurrentMap && !cfg.webmap.shares(webmap::CurrentMap)) ||
                                  (share.bit == webmap::Heading && !cfg.webmap.shares(webmap::Own)) ||
-                                 (share.bit == webmap::PlayerNames && !cfg.webmap.shares(webmap::Own) &&
+                                 ((share.bit == webmap::PlayerNames || share.bit == webmap::PlayerHeld) && !cfg.webmap.shares(webmap::Own) &&
                                   !cfg.webmap.shares(webmap::Players)));
             bool on = cfg.webmap.shares(share.bit);
             if (switchRow(share.label, &on)) {

@@ -96,11 +96,11 @@ bool toBool(const std::string& s, bool dflt) {
     return v == "1" || v == "true" || v == "yes" || v == "on";
 }
 
-void writeLine(const std::string& s) {
-    if (gSerial == INVALID_HANDLE_VALUE) return;
+bool writeLine(const std::string& s) {
+    if (gSerial == INVALID_HANDLE_VALUE) return false;
     DWORD n = 0;
     const std::string out = s + "\r\n";
-    WriteFile(gSerial, out.data(), (DWORD)out.size(), &n, nullptr);
+    return WriteFile(gSerial, out.data(), DWORD(out.size()), &n, nullptr) && n == out.size();
 }
 
 std::string subst(std::string s, const std::string& key, const std::string& val) {
@@ -108,19 +108,17 @@ std::string subst(std::string s, const std::string& key, const std::string& val)
     return s;
 }
 
-void deviceSend(const std::string& cmd, int vk = 0) {
-    if (cmd.empty()) return;
+bool deviceSend(const std::string& cmd, int vk = 0) {
+    if (cmd.empty()) return false;
     std::string s = cmd;
     if (vk) {
         char b[16];
         std::snprintf(b, sizeof b, "%d", vk);
         s = subst(s, "{vk}", b);
     }
-    if (gCfg.modeNet) {
-        if (gSock != INVALID_SOCKET) sendto(gSock, s.c_str(), (int)s.size(), 0, reinterpret_cast<sockaddr*>(&gAddr), sizeof gAddr);
-    } else {
-        writeLine(s);
-    }
+    if (!gCfg.modeNet) return writeLine(s);
+    if (gSock == INVALID_SOCKET) return false;
+    return sendto(gSock, s.data(), int(s.size()), 0, reinterpret_cast<sockaddr*>(&gAddr), sizeof gAddr) == int(s.size());
 }
 
 void setStatus(const std::string& s) {
@@ -879,14 +877,35 @@ const char* keySourceLabel() {
     return "Local / box";
 }
 
-void clickOnce() {
-    if (!connected()) return;
-    deviceSend(gCfg.cmdDown);
-    gDownAt = GetTickCount64();
+namespace {
+void beginClick(ULONGLONG now) {
+    if (gDownAt) return;
+    if (gCfg.cmdUp.empty() || !deviceSend(gCfg.cmdDown)) {
+        gLive.clickStatus = "Click down could not be sent. Check the mouse box and click commands.";
+        return;
+    }
+    gLive.clickStatus.clear();
+    gDownAt = now;
+}
+
+bool finishClick(ULONGLONG now) {
+    if (!deviceSend(gCfg.cmdUp)) {
+        gLive.clickStatus = "Click release could not be sent. Check the mouse box.";
+        return false;
+    }
+    gDownAt = 0;
+    gOutputReleasedAt = now;
+    gLive.clickStatus.clear();
     ++gLive.clicks;
+    return true;
+}
+}  // namespace
+
+void clickOnce() {
+    if (connected()) beginClick(GetTickCount64());
 }
 void disconnectDevice() {
-    if (gDownAt && connected()) deviceSend(gCfg.cmdUp);
+    if (gDownAt && connected()) finishClick(GetTickCount64());
     closeDevice();
     setStatus("disconnected");
     gLive.note.clear();
@@ -899,15 +918,24 @@ const char* boneName(int i) {
     return (i >= 0 && i < 16) ? n[i] : "?";
 }
 
-void update(const std::vector<Cand>& cands, float cx, float cy) {
+void update(const std::vector<Cand>& cands, float cx, float cy, bool projectionReady) {
     const ULONGLONG now = GetTickCount64();
     probeStep();
     if (gDirty && now - gDirtyAt > 600) {
         gDirty = false;
         save();
     }
+    const auto match = projectionReady ? targetAt(gCfg, cands, cx, cy) : TargetMatch{};
+    const Cand* best = match.candidate;
+    gLive.projectionReady = projectionReady;
+    gLive.target = best != nullptr;
+    gLive.bone = best ? best->bone : -1;
+    gLive.px = best ? std::sqrt(match.distanceSq) : 0.f;
+    gLive.dist = best ? best->dist : 0.f;
+    gLive.heldMs = 0;
     if (!connected()) {
-        gLive.target = false;
+        gHaveArmed = false;
+        gArmedId = 0;
         if (gCfg.autoConnect && now - gLastRetry > 1500) {
             gLastRetry = now;
             openDevice();
@@ -926,56 +954,25 @@ void update(const std::vector<Cand>& cands, float cx, float cy) {
     if (!probing() && gCfg.useBinary && !gCfg.modeNet && (gStreamLost || now - gLastStreamOn > 10000)) sendStreams();
 
     if (gDownAt && now - gDownAt >= (ULONGLONG)std::max(2, gCfg.clickMs)) {
-        deviceSend(gCfg.cmdUp);
-        gDownAt = 0;
-        gOutputReleasedAt = now;
+        if (!finishClick(now)) gDownAt = now;  // Retry after the configured button interval.
     }
 
-    const float rad = float(std::max(1, gCfg.radiusPx));
-    const Cand* best = nullptr;
-    float bestD = 1e9f;
-    for (const Cand& c : cands) {
-        if (!(gCfg.hitMask & (1u << c.bone))) continue;
-        if (c.kind != 1) {
-            if (gCfg.playersOnly) continue;
-            if (c.kind != 2 && c.kind != 3) continue;
-            if (c.kind == 3 && !gCfg.animals) continue;
-        }
-        if (gCfg.maxDistM > 0 && c.dist > float(gCfg.maxDistM)) continue;
-        const float dx = c.x - cx, dy = c.y - cy;
-        const float dd = std::sqrt(dx * dx + dy * dy);
-        if (dd > rad) continue;
-        if (dd < bestD) {
-            bestD = dd;
-            best = &c;
-        }
-    }
-
-    if (!gCfg.enabled || !best) {
+    if (!gCfg.enabled || !best || !gLive.keyHeld) {
         gHaveArmed = false;
         gArmedId = 0;
-        gLive.target = false;
-        gLive.bone = -1;
-        gLive.heldMs = 0;
         return;
     }
-    gLive.target = true;
-    gLive.dist = best->dist;
-    gLive.px = bestD;
-    gLive.bone = best->bone;
     if (!gHaveArmed || gArmedId != best->id) {
         gHaveArmed = true;
         gArmedId = best->id;
         gArmedAt = now;
     }
     gLive.heldMs = int(now - gArmedAt);
-    if (!gLive.keyHeld || gDownAt || remoteMouseSettling(now)) return;
+    if (gDownAt || remoteMouseSettling(now)) return;
     if (now - gArmedAt < (ULONGLONG)gCfg.delayMs) return;
     if (gLastShot && now - gLastShot < (ULONGLONG)std::max(1, gCfg.refireMs)) return;
-    deviceSend(gCfg.cmdDown);
-    gDownAt = now;
     gLastShot = now;
-    ++gLive.clicks;
+    beginClick(now);
 }
 
 }  // namespace trigger

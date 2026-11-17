@@ -73,6 +73,9 @@
     <ClInclude Include="src\keyboard_bitmap.h" />
     <ClInclude Include="src\keyboard_resolver.h" />
     <ClInclude Include="src\radar.h" />
+    <ClInclude Include="src\radar_events.h" />
+    <ClInclude Include="src\crosshair.h" />
+    <ClInclude Include="src\dayz_camera.h" />
     <ClInclude Include="src\webmap.h" />
     <ClInclude Include="src\webmap_state.h" />
     <ClInclude Include="src\rtti.h" />

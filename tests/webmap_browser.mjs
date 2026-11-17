@@ -7,8 +7,8 @@ import { resolve } from "node:path";
 import { createRelay } from "../tools/webmap-cloudflare.mjs";
 
 const pause = ms => new Promise(done => setTimeout(done, ms));
-async function until(fn, description) {
-  for (let i = 0; i < 100; i++) {
+async function until(fn, description, maxAttempts = 100) {
+  for (let i = 0; i < maxAttempts; i++) {
     const result = await fn().catch(() => null);
     if (result) return result;
     await pause(75);
@@ -19,8 +19,10 @@ const stage = await mkdtemp(resolve("build/webmap-test/tracking-"));
 await cp("web", resolve(stage, "web"), { recursive: true });
 await mkdir(resolve(stage, "maps"));
 await writeFile(resolve(stage, "maps/chernarusplus.size"), "15360");
-await writeFile(resolve(stage, "maps/chernarusplus.png"),
-  Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+rH8sAAAAASUVORK5CYII=", "base64"));
+const image = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+rH8sAAAAASUVORK5CYII=", "base64");
+await writeFile(resolve(stage, "maps/chernarusplus.png"), image);
+await writeFile(resolve(stage, "maps/different.png"), image);
+await writeFile(resolve(stage, "maps/different.size"), "8192");
 const probe = createServer();
 await new Promise(done => probe.listen(0, "127.0.0.1", done));
 const base = "http://127.0.0.1:" + probe.address().port;
@@ -34,7 +36,7 @@ let sequence = 0;
 let response;
 try {
   await until(async () => (await fetch(base + "/api/status")).ok, "fixture HTTP");
-  fixture.stdin.write("names\n");
+  fixture.stdin.write("events\n");
   const hostname = "hirschgang-test.trycloudflare.com";
   relay = createRelay(port, () => hostname);
   await new Promise(done => relay.listen(0, "127.0.0.1", done));
@@ -83,7 +85,7 @@ try {
     "--user-data-dir=" + profile, "about:blank"
   ], { windowsHide: true });
   chrome.on("error", error => console.error(error.message));
-  const active = await until(() => readFile(resolve(profile, "DevToolsActivePort"), "utf8"), "Chrome DevTools");
+  const active = await until(() => readFile(resolve(profile, "DevToolsActivePort"), "utf8"), "Chrome DevTools", 600);
   const [debugPort, debugPath] = active.trim().split(/\r?\n/);
   socket = new WebSocket("ws://127.0.0.1:" + debugPort + debugPath);
   await new Promise((done, reject) => { socket.onopen = done; socket.onerror = reject; });
@@ -111,15 +113,19 @@ try {
       for (const name of ["clearRect", "moveTo", "lineTo", "stroke", "fillText", "fill"]) {
         const original = p[name];
         p[name] = function (...args) {
-          if (name === "clearRect") window.paint = { strokes: [], names: [], fills: [] };
-          if (name === "moveTo") this.segment = null;
+          if (name === "clearRect") window.paint = { strokes: [], names: [], fills: [], events: [] };
+          if (name === "moveTo") { this.segment = null; this.start = args; }
           if (name === "lineTo") this.segment = args;
           if (name === "stroke" && this.segment?.[0] === 0 && this.segment?.[1] < -19) {
             const m = this.getTransform();
             window.paint.strokes.push({color: this.strokeStyle, angle: Math.round(Math.atan2(m.b,m.a)*180/Math.PI), x: m.e, y: m.f});
           }
           if (name === "fillText") window.paint.names.push(args[0]);
-          if (name === "fill") window.paint.fills?.push(this.fillStyle);
+          if (name === "fill") {
+            window.paint.fills?.push(this.fillStyle);
+            if (["#ffd380", "#ffa869"].includes(this.fillStyle))
+              window.paint.events?.push({ color: this.fillStyle, x: this.start[0], y: this.start[1] });
+          }
           return original.apply(this, args);
         };
       }
@@ -138,8 +144,31 @@ try {
     await until(async () => (await evaluate(opts)).includes("private-player · Freund"), "Name and friend in tracking dropdown");
     response = await until(() => evaluate("paint.strokes.some(s=>s.color === '#3cff8c' && s.angle === 90) && paint.strokes.some(s=>s.color === '#65f1d3' && s.angle === 90) && paint.fills.includes('#fb8d9d')"), "North-Up line on friend and own marker, red other player");
     assert(response);
-    assert.deepEqual((await evaluate("paint.names")).filter(name => name.includes("private") || name.includes("Second")), []);
+    await until(() => evaluate("paint.names.some(t => /^private-player  \\d+m$/.test(t)) && paint.names.includes('GZ_TestRifle') && paint.names.includes('private-name')"), "player names, distance and held item on map");
+    await until(() => evaluate("paint.events.length === 3 && paint.names.includes('Airdrop') && paint.names.includes('Loot-Häufung') && paint.names.includes('Helikopterabsturz')"), "three named event markers");
   }
+  const eventPositions = (await host("paint.events")).sort((a, b) => a.x - b.x);
+  assert.deepEqual(eventPositions.map(event => event.color), ["#ffa869", "#ffd380", "#ffa869"]);
+  assert.ok(Math.abs(eventPositions[0].y - eventPositions[2].y) < .001);
+  assert.ok(Math.abs((eventPositions[1].x - eventPositions[0].x) / (eventPositions[2].x - eventPositions[0].x) - 130 / 250) < .001);
+  const toggleEvents = "[...document.querySelectorAll('#released label')].find(l=>l.textContent.trim()==='Events').querySelector('input').click()";
+  await host(toggleEvents);
+  await until(() => host("paint.events.length === 0"), "events hidden locally");
+  assert.equal(await guest("paint.events.length"), 3);
+  await host(toggleEvents);
+  await host("document.querySelector('#labels').click()");
+  await until(() => host("!paint.names.some(t => /private|GZ_TestRifle/.test(t)) && paint.events.length === 3"), "labels off with symbols still shown");
+  await host("document.querySelector('#labels').click()");
+  await host("document.querySelector('#player-names').click()");
+  await until(() => host("paint.names.includes('GZ_TestRifle') && !paint.names.some(t => t.startsWith('private-player'))"), "hide player name only");
+  assert.ok((await host(opts)).includes("private-player · Freund"));
+  assert.equal(await host("JSON.parse(localStorage.getItem('hirschgangware.webmap.v1')).playerNames"), false);
+  await host("document.querySelector('#player-names').click()");
+  await host("document.querySelector('#held-items').click()");
+  await until(() => host("!paint.names.includes('GZ_TestRifle') && paint.names.some(t => t.startsWith('private-player'))"), "hide held item only");
+  assert.equal(await host("JSON.parse(localStorage.getItem('hirschgangware.webmap.v1')).heldItems"), false);
+  assert.equal(await guest("paint.names.includes('GZ_TestRifle')"), true);
+  await host("document.querySelector('#held-items').click()");
   await guest(`
     const select = document.querySelector('#tracking-target');
     select.selectedIndex = [...select.options].findIndex(o => o.textContent.startsWith('private-player'));
@@ -156,6 +185,18 @@ try {
       Math.abs(s.x/dpr-box.width/2)<1 && Math.abs(s.y/dpr-box.height/2)<1);
   })()`;
   await until(() => guest(aligned), "guest follow plus Heading-Up centered on selected player");
+  fixture.stdin.write("swap\n");
+  await until(() => guest("paint.names.includes('GZ_SecondRifle') && !paint.names.includes('GZ_TestRifle')"), "held item changes during Follow");
+  assert.equal(await guest("document.querySelector('#follow').checked"), true);
+  fixture.stdin.write("empty\n");
+  await until(() => guest("paint.names.some(t => t.startsWith('private-player')) && !paint.names.includes('GZ_SecondRifle')"), "empty hands remove second line");
+  fixture.stdin.write("swap\nnames\n");
+  await until(() => guest("paint.names.some(t => t.startsWith('private-player')) && !paint.names.includes('GZ_SecondRifle') && paint.events.length === 0"), "held and events releases withdrawn");
+  await until(() => guest("!document.querySelector('#held-status').hidden && document.querySelector('#held-status').textContent.includes('Held items')"), "host release guidance");
+  fixture.stdin.write("held\n");
+  await until(() => guest("paint.names.includes('GZ_SecondRifle') && !paint.names.some(t => t.startsWith('private-player'))"), "name release withdrawn independently");
+  fixture.stdin.write("events\n");
+  await until(() => guest(aligned), "follow preserved after release changes");
   assert.equal(await host("document.querySelector('#rotate').checked"), false);
   assert.equal(await host("document.querySelector('#follow').checked"), false);
   await guest("document.querySelector('#zoom-in').click()");
@@ -173,7 +214,11 @@ try {
   }, "guest reconnects and retains target while own marker is absent");
   fixture.stdin.write("unfriend\n");
   await until(() => guest("paint.strokes.some(s=>s.color === '#fb8d9d' && s.angle === 0) && !paint.fills.includes('#3cff8c')"), "friend marker updates to red");
-  console.log("PASS two isolated Chrome clients: dropdown, no map names, direction lines, friend color, follow, rotation, zoom, independent settings, reconnect and live unmark");
+  fixture.stdin.write("events\n");
+  await until(() => host("paint.events.length === 3"), "events ready before map change");
+  fixture.stdin.write("mapchange\n");
+  await until(() => host("document.querySelector('#map-select').value === 'different' && paint.events.length === 0"), "events cleared on map change");
+  console.log("PASS two isolated Chrome clients: live player labels, held item, event positions, layer releases, map switch, follow and friend colors");
 } finally {
   relay?.close();
   socket?.close();

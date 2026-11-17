@@ -6,6 +6,7 @@
 // one on the *gaming* keyboard (works PC to PC). Device config lives in trigger.ini.
 #include "keyboard_bitmap.h"
 
+#include <cmath>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -68,7 +69,28 @@ struct Config {
     bool showDebug = false;
 };
 
+struct TargetMatch {
+    const Cand* candidate = nullptr;
+    float distanceSq = 0;
+};
+
+// Geometry and configured filters are independent of the output device.
+inline TargetMatch targetAt(const Config& cfg, const std::vector<Cand>& cands, float cx, float cy) {
+    const float radius = float(cfg.radiusPx > 0 ? cfg.radiusPx : 1);
+    TargetMatch result{nullptr, radius * radius};
+    for (const Cand& c : cands) {
+        if (c.bone < 0 || c.bone >= 16 || !(cfg.hitMask & (1u << c.bone))) continue;
+        if (c.kind != 1 && (cfg.playersOnly || (c.kind != 2 && !(c.kind == 3 && cfg.animals)))) continue;
+        if (cfg.maxDistM > 0 && c.dist > float(cfg.maxDistM)) continue;
+        const float dx = c.x - cx, dy = c.y - cy;
+        const float d2 = dx * dx + dy * dy;
+        if (d2 <= result.distanceSq && (!result.candidate || d2 < result.distanceSq)) result = {&c, d2};
+    }
+    return result;
+}
+
 struct Live {
+    bool projectionReady = false;
     bool target = false;
     float dist = 0;
     float px = 0;
@@ -79,6 +101,7 @@ struct Live {
     int heldMs = 0;
     std::string note;
     std::string lastRx;
+    std::string clickStatus;
 };
 
 Config& cfg();
@@ -103,7 +126,7 @@ void disconnectDevice();
 void clickOnce();  // one test click through the box
 
 // cands = every visible hitbox of every target (overlay pixels), cx/cy = crosshair
-void update(const std::vector<Cand>& cands, float cx, float cy);
+void update(const std::vector<Cand>& cands, float cx, float cy, bool projectionReady);
 
 void setLog(void (*fn)(const char*));
 void setRemoteKeys(dma_keyboard::Sample (*fn)());
