@@ -38,8 +38,10 @@
 #include "image.h"
 #include "friends.h"
 #include "loot.h"
+#include "overlay_motion.h"
 #include "mapdl.h"
 #include "trigger.h"
+#include "trigger_geometry.h"
 #include "process.h"
 #include "radar.h"
 #include "webmap.h"
@@ -129,6 +131,7 @@ int gGpuFails = 0;
 HWND gOverlay = nullptr, gGame = nullptr;
 RECT gView{};
 std::vector<Box> gBoxes;
+std::vector<trigger::Cand> gDzTriggerRegions;
 int gFps = 0;
 #ifndef HIRSCHGANGWARE_NO_DIAG
 std::atomic<double> gReadAvgMs{0}, gReadMaxMs{0};
@@ -176,6 +179,7 @@ struct DzBoneChain {
 std::unordered_map<uint64_t, DzBoneChain> gDzEntChain;
 std::unordered_map<uint64_t, std::array<Vec3, DJ_Count>> gDzEntJointOfs;
 std::unordered_map<uint64_t, uint64_t> gDzEntReadUs, gDzEntBoneUs;
+std::unordered_map<uint64_t, uint64_t> gDzEntJointUs;
 std::unordered_map<uint64_t, bool> gDzEntDead;
 Vec3 gDzOmega{}, gDzVel{};
 
@@ -204,10 +208,12 @@ struct DzSnap {
         uint32_t webTrackId = 0;
         Vec3 vel{};
         uint64_t posUs = 0;
+        uint64_t rootUs = 0;
         std::string name;
         std::string held;
         int health = player_health::unknown;
         bool hasBones = false;
+        uint64_t jointsUs = 0;
         Vec3 joints[DJ_Count];
     };
     std::vector<E> ents;
@@ -241,6 +247,7 @@ std::shared_ptr<const radar_corpse::Markers> gDzVisibleCorpses;
 std::atomic<bool> gDzReadEvents{false}, gDzReadWebHeld{false}, gDzReadHealth{false};
 std::atomic<bool> gDzReadStashLoot{false};
 std::atomic<bool> gDzReadCoveredVehicles{false};
+std::atomic<bool> gDzReadHighValues{false};
 std::atomic<unsigned> gDzLootInterval{0};
 // 0 = off; positive values cap independent trigger bone reads in meters.
 std::atomic<int> gDzTriggerBoneRange{0};
@@ -637,7 +644,8 @@ bool dzIsRare(const std::string& name) {
 
 int dzLootCategory(int vtCat, const std::string& name) {
     const auto category = loot::classify(vtCat, name);
-    return category != loot::CoveredVehicle && !loot::shown(loot::kStashLoot, category) && dzIsRare(name) ? LC_Rare : category;
+    return category != loot::CoveredVehicle && category != loot::HighValue &&
+        !loot::shown(loot::kStashLoot, category) && dzIsRare(name) ? LC_Rare : category;
 }
 
 std::string dzPretty(int kind, const std::string& raw) {
@@ -918,6 +926,8 @@ bool placeJoints(DzSnap::E& e, const float tf[12], const Vec3* local, const Proc
         ofs[b] = {j[b].x - tf[9], j[b].y - tf[10], j[b].z - tf[11]};
     }
     e.hasBones = true;
+    e.jointsUs = qpcUs();
+    gDzEntJointUs[e.ptr] = e.jointsUs;
     gDzEntJointOfs[e.ptr] = ofs;
     return true;
 }
@@ -1130,6 +1140,7 @@ void scanDayz(DzSnap& out, const char*& stage) {
         prune(gDzEntFwd);
         prune(gDzWebTrackIds);
         prune(gDzEntJointOfs);
+        prune(gDzEntJointUs);
         prune(gDzEntReadUs);
         prune(gDzEntBoneUs);
         prune(gDzEntDead);
@@ -1257,7 +1268,7 @@ void scanDayz(DzSnap& out, const char*& stage) {
         const auto oldT = gDzEntPosUs.find(ptr);
         if (oldP != gDzEntPos.end() && oldT != gDzEntPosUs.end()) {
             if (np.x == oldP->second.x && np.y == oldP->second.y && np.z == oldP->second.z) {
-                if (posNowUs - oldT->second > 60000) gDzEntVel.erase(ptr);
+                if (posNowUs - oldT->second > 150000) gDzEntVel.erase(ptr);
                 continue;
             }
             const double dt = double(posNowUs - oldT->second) / 1e6;
@@ -1337,6 +1348,8 @@ void scanDayz(DzSnap& out, const char*& stage) {
             if (vIt != gDzEntVel.end()) ee.vel = vIt->second;
             const auto tIt = gDzEntPosUs.find(ptr);
             ee.posUs = tIt != gDzEntPosUs.end() ? tIt->second : posNowUs;
+            const auto rootRead = gDzEntReadUs.find(ptr);
+            if (rootRead != gDzEntReadUs.end()) ee.rootUs = rootRead->second;
             const auto nIt = gDzEntName.find(ptr);
             if (nIt != gDzEntName.end()) {
                 ee.name = nIt->second;
@@ -1384,6 +1397,8 @@ void scanDayz(DzSnap& out, const char*& stage) {
             for (int b = 0; b < DJ_Count; ++b)
                 e.joints[b] = {e.feet.x + oit->second[b].x, e.feet.y + oit->second[b].y, e.feet.z + oit->second[b].z};
             e.hasBones = true;
+            const auto stamp = gDzEntJointUs.find(e.ptr);
+            if (stamp != gDzEntJointUs.end()) e.jointsUs = stamp->second;
         }
     }
 
@@ -1771,6 +1786,7 @@ void dzLootPass(uint64_t world) {
     const bool readEvents = gDzReadEvents.load(std::memory_order_relaxed);
     const bool readStashLoot = gDzReadStashLoot.load(std::memory_order_relaxed);
     const bool readCoveredVehicles = gDzReadCoveredVehicles.load(std::memory_order_relaxed);
+    const bool readHighValues = gDzReadHighValues.load(std::memory_order_relaxed);
     std::unordered_set<uint64_t> freshEventPositions;
     std::shared_ptr<const std::vector<radar_event::Marker>> events;
     thread_local radar_event::Tracker eventTracker;
@@ -1934,10 +1950,11 @@ void dzLootPass(uint64_t world) {
                     needPos.push_back(s);
                     continue;
                 }
-                if ((readStashLoot || readCoveredVehicles) && stashPositions < webmap::kStashLootLimit) {
+                if ((readStashLoot || readCoveredVehicles || readHighValues) && stashPositions < webmap::kStashLootLimit) {
                     const auto cat = gDzLootCat.find(s);
                     if (cat != gDzLootCat.end() && ((readStashLoot && loot::shown(loot::kStashLoot, cat->second)) ||
-                        (readCoveredVehicles && cat->second == loot::CoveredVehicle))) {
+                        (readCoveredVehicles && cat->second == loot::CoveredVehicle) ||
+                        (readHighValues && cat->second == loot::HighValue))) {
                         needPos.push_back(s);
                         ++stashPositions;
                         continue;
@@ -2306,6 +2323,7 @@ dz::Cam predictCam(const dz::Cam& c) {
 
 void projectDz(const DzSnap& snap, const dz::Cam& view, const Vec3& me) {
     gBoxes.clear();
+    gDzTriggerRegions.clear();
     const float range = float(gSettings.dzRange);
     const float w = float(gView.right - gView.left), h = float(gView.bottom - gView.top);
     const uint64_t nowUs = qpcUs();
@@ -2314,7 +2332,7 @@ void projectDz(const DzSnap& snap, const dz::Cam& view, const Vec3& me) {
         Vec3 feet = ent.feet;
         Vec3 lead{0, 0, 0};
         if (ent.posUs) {
-            const double age = std::clamp(double(nowUs > ent.posUs ? nowUs - ent.posUs : 0) / 1e6, 0.0, 0.30);
+            const float age = overlay_motion::leadSeconds(ent.posUs, nowUs);
             lead = {float(ent.vel.x * age), float(ent.vel.y * age), float(ent.vel.z * age)};
             feet.x += lead.x;
             feet.y += lead.y;
@@ -2342,6 +2360,18 @@ void projectDz(const DzSnap& snap, const dz::Cam& view, const Vec3& me) {
         b.health = ent.health;
         b.id = ent.ptr;
         if (ent.hasBones) {
+            const auto& triggerConfig = trigger::cfg();
+            if ((triggerConfig.enabled || triggerConfig.moduleOpen || triggerConfig.showRegions) &&
+                (triggerConfig.maxDistM <= 0 || dist <= float(triggerConfig.maxDistM))) {
+                std::array<Vec3, DJ_Count> worldJoints{};
+                for (int j = 0; j < DJ_Count; ++j)
+                    worldJoints[size_t(j)] = {ent.joints[j].x + lead.x, ent.joints[j].y + lead.y, ent.joints[j].z + lead.z};
+                trigger::Cand identity;
+                identity.dist = dist; identity.kind = ent.kind; identity.isFriend = !b.enemy; identity.id = b.id;
+                trigger_geometry::appendBody(view,
+                    {float(gView.left), float(gView.top), float(gView.right), float(gView.bottom)},
+                    worldJoints, std::min(ent.jointsUs, ent.rootUs), nowUs, identity, gDzTriggerRegions);
+            }
             for (int j = 0; j < DJ_Count; ++j) {
                 float jx, jy;
                 const Vec3 jp{ent.joints[j].x + lead.x, ent.joints[j].y + lead.y, ent.joints[j].z + lead.z};
@@ -2411,8 +2441,9 @@ void updateDzRadar(const DzSnap& snap, const Vec3& me, const Vec3& fwd) {
         for (const DzSnap::E& ent : gDzRadarSnap.ents) gDzRadar.pts.push_back({ent.feet.x, ent.feet.z, ent.kind, &ent.name, ent.fwdX, ent.fwdZ, &ent.held, ent.health});
         if (gDzRadarSnap.loot)
             for (const DzLootItem& it : *gDzRadarSnap.loot)
-                if (it.cat == loot::CoveredVehicle ? loot::shown(gSettings.dzLootCats, it.cat) :
-                    (gSettings.dzLoot && !it.mapOnly) || loot::shown(gSettings.dzRadarStashLoot, it.cat))
+                if (it.cat == loot::HighValue ? gSettings.dzHighValues :
+                    it.cat == loot::CoveredVehicle ? loot::shown(gSettings.dzLootCats, it.cat) :
+                    (gSettings.dzLoot && !it.mapOnly) || loot::shown(gSettings.radarStashLootMask(), it.cat))
                     gDzRadar.pts.push_back({it.pos.x, it.pos.z, 10 + it.cat, &it.name});
     }
 }
@@ -2595,12 +2626,15 @@ void dzLootLoop() {
 
 void updateWebmapReaders() {
     auto& web = gSettings.webmap;
-    const bool stashLoot = gSettings.dzRadarStashLoot != 0;
+    web.stashLootMask = gSettings.radarStashLootMask();
+    const bool stashLoot = web.stashLootMask != 0;
     const bool coveredVehicles = loot::shown(gSettings.dzLootCats, loot::CoveredVehicle);
     if (stashLoot) web.release |= webmap::StashLoot;
     else web.release &= ~unsigned(webmap::StashLoot);
     if (gSettings.dzVehicles || coveredVehicles) web.release |= webmap::Vehicles;
     else web.release &= ~unsigned(webmap::Vehicles);
+    if (gSettings.dzHighValues) web.release |= webmap::HighValues;
+    else web.release &= ~unsigned(webmap::HighValues);
     const bool published = web.enabled && web.shares(webmap::CurrentMap);
     gDzReadHealth.store(gSettings.dzEspHealth || gSettings.dzRadarHealth || (published && web.shares(webmap::PlayerHealth)),
                         std::memory_order_relaxed);
@@ -2609,7 +2643,8 @@ void updateWebmapReaders() {
         ++gDzEventRevision;
     gDzReadStashLoot.store(stashLoot, std::memory_order_relaxed);
     gDzReadCoveredVehicles.store(coveredVehicles, std::memory_order_relaxed);
-    gDzLootInterval.store(gSettings.dzLoot ? kLootPassMs : events || stashLoot || coveredVehicles ? 300 : 0,
+    gDzReadHighValues.store(gSettings.dzHighValues, std::memory_order_relaxed);
+    gDzLootInterval.store(gSettings.dzLoot ? kLootPassMs : events || stashLoot || coveredVehicles || gSettings.dzHighValues ? 300 : 0,
                           std::memory_order_relaxed);
     gDzReadWebHeld.store(published && web.shares(webmap::PlayerHeld) &&
         (web.shares(webmap::Players) || web.shares(webmap::Own)), std::memory_order_relaxed);
@@ -2701,17 +2736,23 @@ void publishWebmap(const DzSnap& snap, const Vec3* heading) {
     const bool shareStashLoot = options.shares(webmap::StashLoot) && mapMatches;
     const bool shareCoveredVehicles = options.shares(webmap::Vehicles) && mapMatches &&
                                       loot::shown(gSettings.dzLootCats, loot::CoveredVehicle);
-    if ((shareLoot || shareStashLoot || shareCoveredVehicles) && snap.loot) {
-        unsigned ordinary = 0, special = 0;
+    const bool shareHighValues = options.shares(webmap::HighValues) && mapMatches;
+    if ((shareLoot || shareStashLoot || shareCoveredVehicles || shareHighValues) && snap.loot) {
+        unsigned ordinary = 0, special = 0, highValues = 0;
         for (const auto& d : *snap.loot) {
             if (!radar_event::valid({d.pos.x, d.pos.z}) || d.pos.x > frame.mapSize || d.pos.z > frame.mapSize) continue;
-            if (d.cat == loot::CoveredVehicle) {
+            if (d.cat == loot::HighValue) {
+                if (shareHighValues && highValues < 512) {
+                    add(d.pos.x, d.pos.z, radar::Icon::Loot, d.cat);
+                    ++highValues;
+                }
+            } else if (d.cat == loot::CoveredVehicle) {
                 if (shareCoveredVehicles && counts[3] < 512) {
                     add(d.pos.x, d.pos.z, radar::Icon::Loot, d.cat);
                     ++counts[3];
                 }
-            } else if (shareStashLoot && loot::shown(loot::kStashLoot, d.cat)) {
-                if (special == webmap::kStashLootLimit) continue;
+            } else if (loot::shown(loot::kStashLoot, d.cat)) {
+                if (!shareStashLoot || !loot::shown(options.stashLootMask, d.cat) || special == webmap::kStashLootLimit) continue;
                 add(d.pos.x, d.pos.z, radar::Icon::Loot, d.cat);
                 frame.dots.back().webStashLoot = true;
                 ++special;
@@ -2726,7 +2767,7 @@ void publishWebmap(const DzSnap& snap, const Vec3* heading) {
 
 bool drawDayzFrame() {
     const auto& trig = trigger::cfg();
-    gDzTriggerBoneRange.store(trig.enabled || trig.moduleOpen ? (trig.maxDistM > 0 ? trig.maxDistM : gSettings.dzRange) : 0,
+    gDzTriggerBoneRange.store(trig.enabled || trig.moduleOpen || trig.showRegions ? (trig.maxDistM > 0 ? trig.maxDistM : gSettings.dzRange) : 0,
                               std::memory_order_relaxed);
     if (gDzGone.exchange(false)) {
         logLine("[*] Game or DMA connection lost. Start again from the launcher.");
@@ -2780,11 +2821,10 @@ bool drawDayzFrame() {
 #endif
 
         {
-            static std::vector<trigger::Cand> trigCands;
-            trigCands.clear();
             const float ccx = crosshair::center(gView.left, gView.right);
             const float ccy = crosshair::center(gView.top, gView.bottom);
             for (const Box& b : gBoxes) {
+                if (b.kind != 3) continue; // Existing animal point mode has no humanoid body model.
                 for (int j = 0; j < DJ_Count; ++j) {
                     if (!b.skel.ok[j]) continue;
                     trigger::Cand c;
@@ -2795,10 +2835,10 @@ bool drawDayzFrame() {
                     c.kind = b.kind;
                     c.isFriend = !b.enemy;
                     c.id = b.id;
-                    trigCands.push_back(c);
+                    gDzTriggerRegions.push_back(c);
                 }
             }
-            trigger::update(trigCands, ccx, ccy, true);
+            trigger::update(gDzTriggerRegions, ccx, ccy, true);
             static std::string lastRxSeen;
             if (trigger::cfg().showDebug && trigger::live().lastRx != lastRxSeen) {
                 lastRxSeen = trigger::live().lastRx;
@@ -2828,6 +2868,7 @@ bool drawDayzFrame() {
 #endif
     } else {
         gBoxes.clear();
+        gDzTriggerRegions.clear();
         gDzLootPts.clear();
 #ifndef HIRSCHGANGWARE_NO_DIAG
         gDzDbgBones.clear();
@@ -2854,8 +2895,8 @@ bool drawDayzFrame() {
     projectionMisses += !gotCam;
     if (gotCam) peakAgeUs = std::max(peakAgeUs, unsigned(nowUs - cs.tUs));
     if (now - lastRlog >= 2000) {
-        logLine("[log] render: %d fps, cam %.2f ms, paint %.2f ms, %d boxes; projection misses=%u peak age=%.2f ms",
-                gFps, gDzCamMs.load(), gPaintMs, int(gBoxes.size()), projectionMisses, peakAgeUs / 1000.0);
+        logLine("[log] render: %d fps, cam %.2f ms, paint %.2f ms, %d boxes; projection misses=%u peak age=%.2f ms regions=%u",
+                gFps, gDzCamMs.load(), gPaintMs, int(gBoxes.size()), projectionMisses, peakAgeUs / 1000.0, trigger::live().regionCount);
         projectionMisses = peakAgeUs = 0;
         lastRlog = now;
     }
@@ -3010,6 +3051,7 @@ constexpr DzIcon kIconLoot[loot::Count] = {
     {"..###..", ".#####.", "#######", "#..#..#", "#######", "#.....#", "#######"},
     {".###...", "#...#..", "#...#..", ".######", "....#.#", "......#", "......."},
     {".......", "..###..", ".#####.", "#######", "#######", ".#...#.", "......."},
+    {"...#...", ".#####.", "#..#...", ".#####.", "...#..#", ".#####.", "...#..."},
 };
 
 void drawDzIcon(Canvas& cv, const char* const* icon, int cx, int cy, int cell, COLORREF col) {
@@ -3098,12 +3140,12 @@ float drawRadarView(Canvas& cv, const RECT& area, const Vec3& c, float R, bool f
         if ((p.kind == 2 && !gSettings.dzInfected) || (p.kind == 4 && !gSettings.dzVehicles)) continue;
         const int px = int(sx(p.x)), py = int(sy(p.z));
         const bool loot = p.kind >= 10;
-        if (loot && !::loot::mapVisible(gSettings.dzLoot, gSettings.dzLootCats, gSettings.dzRadarStashLoot,
-                                      p.kind - 10, p.name ? *p.name : std::string())) continue;
+        if (loot && !::loot::mapVisible(gSettings.dzLoot, gSettings.dzLootCats, gSettings.radarStashLootMask(),
+                                      p.kind - 10, p.name ? *p.name : std::string(), gSettings.dzHighValues)) continue;
         const COLORREF col = loot ? dzLootColor(p.kind - 10) : dzKindColor(p.kind, !(p.name && friends::contains(*p.name)));
         int hs = 0;
         if (loot) {
-            const bool highlighted = p.kind == 10 + LC_Rare || ::loot::shown(gSettings.dzRadarStashLoot, p.kind - 10);
+            const bool highlighted = p.kind == 10 + LC_Rare || ::loot::shown(gSettings.radarStashLootMask(), p.kind - 10);
             const int cell = highlighted ? entCell : lootCell;
             hs = 7 * cell / 2 + 1;
             if (px - hs < l || px + hs >= r || py - hs < t || py + hs >= b) continue;
@@ -3119,7 +3161,7 @@ float drawRadarView(Canvas& cv, const RECT& area, const Vec3& c, float R, bool f
         }
         if (!gSettings.dzRadarNames || !p.name) continue;
         const float d = std::sqrt((p.x - me.x) * (p.x - me.x) + (p.z - me.z) * (p.z - me.z));
-        const bool label = loot ? (p.kind == 10 + LC_Rare || ::loot::shown(gSettings.dzRadarStashLoot, p.kind - 10) ||
+        const bool label = loot ? (p.kind == 10 + LC_Rare || ::loot::shown(gSettings.radarStashLootMask(), p.kind - 10) ||
                                   d <= float(std::max(25, gSettings.dzRadarLootLabel))) : p.kind != 2;
         if (!label) continue;
         char txt[96];
@@ -3175,7 +3217,14 @@ void drawScene(Canvas& cv) {
         cv.text(fps, {gView.left + 6, gView.top + 6, gView.right, gView.top + 26}, RGB(255, 220, 80), DT_LEFT | DT_TOP);
     }
     for (const auto& b : gBoxes) {
-        const COLORREF col = dzKindColor(b.kind, b.enemy);
+        const COLORREF col = b.kind == 1 && b.enemy ? gSettings.enemyColor : dzKindColor(b.kind, b.enemy);
+        const auto caption = [&](const char* text, const RECT& bounds, UINT align) {
+            for (const POINT offset : {POINT{-1, 0}, POINT{1, 0}, POINT{0, -1}, POINT{0, 1}}) {
+                const RECT edge{bounds.left + offset.x, bounds.top + offset.y, bounds.right + offset.x, bounds.bottom + offset.y};
+                cv.text(text, edge, RGB(1, 1, 1), align);
+            }
+            cv.text(text, bounds, col, align);
+        };
         const int l = int(b.x), t = int(b.y), r = int(b.x + b.w), btm = int(b.y + b.h);
         const auto& opt = gSettings;
         if (b.kind >= 3) {
@@ -3183,11 +3232,11 @@ void drawScene(Canvas& cv) {
             cv.rect(l, t, r, btm);
             cv.pen(col, 1);
             cv.rect(l, t, r, btm);
-            if (opt.names) cv.text(b.e.name.c_str(), {l - 80, t - 16, r + 80, t - 1}, col, DT_CENTER | DT_BOTTOM);
+            if (opt.names) caption(b.e.name.c_str(), {l - 80, t - 16, r + 80, t - 1}, DT_CENTER | DT_BOTTOM);
             if (opt.info) {
                 char info[16];
                 std::snprintf(info, sizeof info, "%.0fm", b.dist);
-                cv.text(info, {l - 80, btm + 1, r + 80, btm + 16}, col, DT_CENTER | DT_TOP);
+                caption(info, {l - 80, btm + 1, r + 80, btm + 16}, DT_CENTER | DT_TOP);
             }
             continue;
         }
@@ -3226,19 +3275,32 @@ void drawScene(Canvas& cv) {
             });
         }
 
-        if (opt.names) cv.text(b.e.name.c_str(), {l - 80, t - 16, r + 80, t - 1}, col, DT_CENTER | DT_BOTTOM);
+        if (opt.names) caption(b.e.name.c_str(), {l - 80, t - 16, r + 80, t - 1}, DT_CENTER | DT_BOTTOM);
         if (opt.info) {
             char info[64];
             std::snprintf(info, sizeof info, b.weapon.empty() ? "%.0fm" : "%.0fm  %s", b.dist, b.weapon.c_str());
-            cv.text(info, {l - 80, btm + 1, r + 80, btm + 16}, col, DT_CENTER | DT_TOP);
+            caption(info, {l - 80, btm + 1, r + 80, btm + 16}, DT_CENTER | DT_TOP);
         }
         if (opt.dzEspHealth && player_health::valid(b.health)) {
             const auto hp = player_health::label(b.health);
             const int y = btm + (opt.info ? 16 : 1);
-            cv.text(hp.c_str(), {l - 80, y, r + 80, y + 15}, col, DT_CENTER | DT_TOP);
+            caption(hp.c_str(), {l - 80, y, r + 80, y + 15}, DT_CENTER | DT_TOP);
         }
     }
 
+    if (trigger::cfg().showRegions) {
+        const float cx = crosshair::center(gView.left, gView.right), cy = crosshair::center(gView.top, gView.bottom);
+        const auto match = trigger::targetAt(trigger::cfg(), gDzTriggerRegions, cx, cy);
+        for (const auto& region : gDzTriggerRegions) {
+            if (!(trigger::cfg().hitMask & (1u << region.bone)) || region.regionSize < 3) continue;
+            const COLORREF ink = match.candidate == &region ? RGB(90, 255, 150) : RGB(70, 145, 170);
+            cv.pen(ink, 1);
+            for (unsigned i = 0; i < region.regionSize; ++i) {
+                const auto a = region.region[i], b = region.region[(i + 1) % region.regionSize];
+                cv.line(int(std::lround(a.x)), int(std::lround(a.y)), int(std::lround(b.x)), int(std::lround(b.y)));
+            }
+        }
+    }
     if (gSettings.dzLoot && !gDzLootPts.empty()) {
         for (const auto& lp : gDzLootPts) {
             const COLORREF lc = dzLootColor(lp.cat);
@@ -3381,6 +3443,7 @@ void stopEsp() {
     gDzEntName.clear();
     gDzEntChain.clear();
     gDzEntJointOfs.clear();
+    gDzEntJointUs.clear();
     gDzEntReadUs.clear();
     gDzEntBoneUs.clear();
     gDzEntDead.clear();
@@ -3572,6 +3635,8 @@ void syncRadarScreen() {
     cfg.loot = gSettings.dzLoot;
     cfg.lootMask = gSettings.dzLootCats & loot::kAll;
     cfg.stashLootMask = gSettings.dzRadarStashLoot;
+    cfg.stashLootEnabled = gSettings.dzRadarStashLootEnabled;
+    cfg.highValues = gSettings.dzHighValues;
     cfg.filter = loot::filter();
     cfg.headings = gSettings.dzRadarHeadings;
     cfg.headingLen = gSettings.dzRadarHeadingLen;
@@ -3591,6 +3656,7 @@ void syncRadarScreen() {
     cfg.esp.crosshairSize = gSettings.crosshairSize;
     cfg.esp.crosshairStyle = gSettings.crosshairStyle;
     cfg.esp.crosshairColor = gSettings.crosshairColor;
+    cfg.esp.enemyColor = gSettings.enemyColor;
     cfg.animals = gSettings.dzAnimals;
     cfg.vehicles = gSettings.dzVehicles;
     cfg.infected = gSettings.dzInfected;
@@ -3650,6 +3716,8 @@ void syncRadarScreen() {
         gSettings.dzLoot = cfg.loot;
         gSettings.dzLootCats = cfg.lootMask;
         gSettings.dzRadarStashLoot = cfg.stashLootMask;
+        gSettings.dzRadarStashLootEnabled = cfg.stashLootEnabled;
+        gSettings.dzHighValues = cfg.highValues;
         loot::setFilter(cfg.filter);
         const loot::Filter fl = loot::filter();
         gSettings.dzFilterMode = fl.mode;
@@ -3671,6 +3739,7 @@ void syncRadarScreen() {
         gSettings.crosshairSize = cfg.esp.crosshairSize;
         gSettings.crosshairStyle = cfg.esp.crosshairStyle;
         gSettings.crosshairColor = cfg.esp.crosshairColor;
+        gSettings.enemyColor = cfg.esp.enemyColor;
         gSettings.dzAnimals = cfg.animals;
         gSettings.dzVehicles = cfg.vehicles;
         gSettings.dzInfected = cfg.infected;

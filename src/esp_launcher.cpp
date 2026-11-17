@@ -180,6 +180,7 @@ void loadSettings(EspSettings& s) {
     s.dzInfected = readBool("dz_infected", readBool("dz_radar_infected", s.dzInfected));
     s.dzRadarNames = readBool("dz_radar_names", s.dzRadarNames);
     s.dzRadarEvents = readBool("dz_radar_events", s.dzRadarEvents);
+    s.dzHighValues = readBool("dz_high_values", s.dzHighValues);
     s.dzRadarCorpses = readBool("dz_radar_corpses", s.dzRadarCorpses);
     s.dzRadarLootLabel = GetPrivateProfileIntA(readSection(), "dz_radar_loot_label", s.dzRadarLootLabel, readIniPath().c_str());
     s.dzRadarMarker = GetPrivateProfileIntA(readSection(), "dz_radar_marker_x100", int(s.dzRadarMarker * 100 + 0.5f), readIniPath().c_str()) / 100.f;
@@ -190,6 +191,13 @@ void loadSettings(EspSettings& s) {
         if (loot::shown(s.dzLootCats, loot::Other)) s.dzLootCats |= 1u << loot::CoveredVehicle;
     }
     s.dzRadarStashLoot = GetPrivateProfileIntA(readSection(), "dz_radar_stash_loot", s.dzRadarStashLoot, readIniPath().c_str()) & loot::kStashLoot;
+    const auto stashEnabled = GetPrivateProfileIntA(readSection(), "dz_radar_stash_loot_enabled", 2, readIniPath().c_str());
+    if (stashEnabled == 2) {
+        s.dzRadarStashLootEnabled = s.dzRadarStashLoot != 0;
+        if (!s.dzRadarStashLoot) s.dzRadarStashLoot = loot::kStashLoot;
+    } else {
+        s.dzRadarStashLootEnabled = stashEnabled != 0;
+    }
     s.dzRadarHeadings = readBool("dz_radar_headings", s.dzRadarHeadings);
     s.dzRadarHeadingLen = GetPrivateProfileIntA(readSection(), "dz_radar_heading_len", s.dzRadarHeadingLen, readIniPath().c_str());
     s.dzFilterMode = GetPrivateProfileIntA(readSection(), "dz_filter_mode", s.dzFilterMode, readIniPath().c_str());
@@ -210,6 +218,7 @@ void loadSettings(EspSettings& s) {
     const auto style = GetPrivateProfileIntA(readSection(), "crosshair_style", int(s.crosshairStyle), readIniPath().c_str());
     if (style <= unsigned(crosshair::Style::Dot)) s.crosshairStyle = crosshair::Style(style);
     s.crosshairColor = GetPrivateProfileIntA(readSection(), "crosshair_color", s.crosshairColor, readIniPath().c_str()) & 0xFFFFFF;
+    s.enemyColor = GetPrivateProfileIntA(readSection(), "esp_enemy_color", s.enemyColor, readIniPath().c_str()) & 0xFFFFFF;
 }
 
 void saveSettings(const EspSettings& s) {
@@ -251,12 +260,14 @@ void saveSettings(const EspSettings& s) {
     writeBool("dz_infected", s.dzInfected);
     writeBool("dz_radar_names", s.dzRadarNames);
     writeBool("dz_radar_events", s.dzRadarEvents);
+    writeBool("dz_high_values", s.dzHighValues);
     writeBool("dz_radar_corpses", s.dzRadarCorpses);
     writeString("dz_radar_loot_label", std::to_string(s.dzRadarLootLabel));
     writeString("dz_radar_marker_x100", std::to_string(int(s.dzRadarMarker * 100 + 0.5f)));
     writeString("dz_loot_cats", std::to_string(s.dzLootCats));
     writeString("dz_loot_category_count", std::to_string(loot::Count));
     writeString("dz_radar_stash_loot", std::to_string(s.dzRadarStashLoot));
+    writeBool("dz_radar_stash_loot_enabled", s.dzRadarStashLootEnabled);
     writeBool("dz_radar_headings", s.dzRadarHeadings);
     writeString("dz_radar_heading_len", std::to_string(s.dzRadarHeadingLen));
     writeString("dz_filter_mode", std::to_string(s.dzFilterMode));
@@ -275,5 +286,6 @@ void saveSettings(const EspSettings& s) {
     writeString("crosshair_size", std::to_string(s.crosshairSize));
     writeString("crosshair_style", std::to_string(int(s.crosshairStyle)));
     writeString("crosshair_color", std::to_string(s.crosshairColor));
+    writeString("esp_enemy_color", std::to_string(s.enemyColor));
 }
 

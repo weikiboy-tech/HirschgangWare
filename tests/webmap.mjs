@@ -73,6 +73,9 @@ assert.equal(c.follow,true);
 const valid=JSON.stringify({v:1,live:true,map:"chernarusplus",me:{x:1,z:2,heading:-179},layers:{loot:[{x:3,z:4,category:2}]}});
 assert.equal(decode(valid).me.heading,-179);
 const stashPacket = JSON.parse(valid);
+const highValuePacket = {...stashPacket, layers:{highValues:[{x:520,z:940}]}};
+assert.deepEqual(decode(JSON.stringify(highValuePacket)).layers.highValues,[{x:520,z:940}]);
+assert.equal(decode(JSON.stringify({...highValuePacket,layers:{highValues:[{x:-1,z:940}]}})),null);
 stashPacket.layers = {stashLoot: [
   {x:450,z:960,kind:"backpack",label:"HuntingBag_Autumn"},
   {x:560,z:960,kind:"vehicle-key",label:"ExpansionCarKey_Red"},
@@ -82,13 +85,20 @@ assert.deepEqual(decode(JSON.stringify(stashPacket)).layers.stashLoot,
   stashPacket.layers.stashLoot.map(({x, z, kind}) => ({x, z, kind})));
 stashPacket.layers.stashLoot.push({x:720,z:960,kind:"tool",label:"Hammer"});
 assert.equal(decode(JSON.stringify(stashPacket)), null);
-const { playerLines, trackingTargets } = await import(source("../web/live.js"));
+const { playerLines, trackingTargets, savedPlayer, resolveSavedPlayer } = await import(source("../web/live.js"));
 const playerPacket = JSON.parse(valid);
 const firstId = "fedcba9876543210-42", secondId = "fedcba9876543210-43";
 playerPacket.layers.players = [{x:3,z:4,heading:90,id:firstId,name:"Freund",held:"Rifle",friend:true},{x:5,z:6,id:secondId}];
 playerPacket.layers.events = [{x:7,z:8,kind:"airdrop",label:"Airdrop"}];
 const decoded = decode(JSON.stringify(playerPacket));
 const visible = trackingTargets(decoded, true);
+const remembered = savedPlayer({id:firstId,name:"Freund"});
+assert.equal(resolveSavedPlayer(remembered,visible),firstId);
+assert.equal(resolveSavedPlayer(remembered,new Map()),null);
+assert.equal(resolveSavedPlayer(remembered,new Map([[secondId,{name:"Freund"}]])),secondId);
+assert.equal(resolveSavedPlayer(remembered,new Map([[secondId,{name:"Freund"}],["0123456789abcdef-9",{name:"Freund"}]])),null);
+assert.equal(resolveSavedPlayer(savedPlayer({id:"own",name:"Freund"}),new Map([[secondId,{name:"Freund"}]])),null);
+assert.equal(savedPlayer({id:"invalid",name:"Freund"}),null);
 assert.deepEqual(decoded.layers.events, playerPacket.layers.events);
 const corpse = { x: 7, z: 8, id: "0123456789abcdef-7", ttlMs: 420000 };
 const deathPacket = {...playerPacket, layers: {corpses: [corpse]}};

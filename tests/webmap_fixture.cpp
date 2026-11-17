@@ -95,6 +95,14 @@ int main(int argc, char** argv) {
     assert(loot::classify(loot::Other, "ExpansionCarKey_Red") == loot::VehicleKey);
     assert(loot::classify(loot::Other, "UndergroundStash") == loot::Stash);
     assert(loot::classify(loot::Other, "HiddenStash") == loot::Stash);
+    for (const auto* name : {"GZ_Bitcoin", "Bitcoin", "gz_diamond", "GZEFT_LEDX", "Videocard_BL3080",
+                             "GZEFT_HVGoldenPendant", "GZ_XM2010"})
+        assert(loot::classify(loot::Other, name) == loot::HighValue);
+    for (const auto* name : {"BitcoinMining_Kit", "GZBM_PowerSupplyUnit", "BBP_Carpet_DiamondPlate",
+                             "CigarettePack_Merkur", "M4A1", "gz_diamond_fake"})
+        assert(loot::classify(loot::Other, name) != loot::HighValue);
+    assert(loot::mapVisible(false, 0, 0, loot::HighValue, "GZEFT_LEDX", true));
+    assert(!loot::mapVisible(true, loot::kAll, 0, loot::HighValue, "GZEFT_LEDX", false));
     for (const auto* name : {"Motorbike_Red_Cover", "Motorbike_COVER", "OffroadHatchback_Blue_Cover",
                              "Truck_01_Cover", "ExpansionUAZ_Green_Cover", "GZ_Quad_Black_Cover"})
         assert(loot::classify(loot::Other, name) == loot::CoveredVehicle);
@@ -109,6 +117,8 @@ int main(int argc, char** argv) {
         assert(loot::mapVisible(false, 0, loot::kStashLoot, category, ""));
     assert(!loot::mapVisible(false, loot::kAll, loot::kStashLoot, loot::Tool, "Hammer"));
     assert(!loot::mapVisible(false, loot::kAll, 0, loot::Bag, "HuntingBag_Autumn"));
+    assert(!loot::mapVisible(true, loot::kAll, 1u << loot::VehicleKey, loot::Bag, "HuntingBag_Autumn"));
+    assert(loot::mapVisible(true, loot::kAll, 1u << loot::VehicleKey, loot::VehicleKey, "ExpansionCarKey_Red"));
     if (argc != 3) return 2;
     const auto hp = player_health::parse("HIRSCHGANG-HP-1 1000 chernarusplus Private Test\n42 500 1000 37.5 50\n");
     assert(hp.current(3499, "chernarusplus", "Private Test"));
@@ -132,6 +142,8 @@ int main(int argc, char** argv) {
     std::atomic<unsigned> held{1};
     std::atomic<bool> eventStage{false}, differentMap{false};
     std::atomic<bool> backpackPresent{true};
+    std::atomic<bool> playerVisible{true};
+    std::atomic<unsigned> returningId{42};
     const auto events = eventScenario();
     const auto corpses = corpseScenario();
     std::thread writer([&] {
@@ -155,10 +167,10 @@ int main(int argc, char** argv) {
             radar::Dot player;
             player.x = 500; player.z = 1000; player.fwdX = 1; player.name = "private-player";
             player.health = hp.find(42, 500, 1000);
-            player.webTrackId = 42; player.webFriend = friendMarked.load();
+            player.webTrackId = returningId.load(); player.webFriend = friendMarked.load();
             const auto weapon = held.load();
             player.held = weapon == 1 ? "GZ_TestRifle" : weapon == 2 ? "GZ_SecondRifle" : "";
-            frame.dots.push_back(player);
+            if (playerVisible) frame.dots.push_back(player);
             player.x = 600; player.fwdX = 0;
             player.webTrackId = 43; player.webFriend = false; player.name = "Second player";
             player.held.clear();
@@ -168,6 +180,14 @@ int main(int argc, char** argv) {
             loot.label = "private-item";
             frame.dots.push_back(loot);
             if (!alternate) {
+                radar::Dot highValue;
+                highValue.icon = radar::Icon::Loot;
+                highValue.cat = loot::HighValue;
+                highValue.x = 520; highValue.z = 940;
+                highValue.label = "GZ_Bitcoin";
+                frame.dots.push_back(highValue);
+                highValue.x = 630; highValue.label = "GZEFT_LEDX";
+                frame.dots.push_back(highValue);
                 radar::Dot vehicle;
                 vehicle.icon = radar::Icon::Vehicle; vehicle.x = 490; vehicle.z = 1080;
                 vehicle.label = "TestCar";
@@ -187,6 +207,9 @@ int main(int argc, char** argv) {
                 frame.dots.push_back(loot);
                 loot.x = 720; loot.cat = ::loot::Tool; loot.label = "Hammer";
                 frame.dots.push_back(loot);
+                loot.webStashLoot = false;
+                loot.x = 780; loot.cat = ::loot::Bag;
+                frame.dots.push_back(loot);
             }
             webmap::publish(alternate ? "different" : "chernarusplus", std::move(frame));
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
@@ -196,6 +219,8 @@ int main(int argc, char** argv) {
     while (std::getline(std::cin, line)) {
         if (line == "quit") break;
         if (line == "unfriend") { friendMarked = false; continue; }
+        if (line == "player-away") { playerVisible = false; continue; }
+        if (line == "player-return") { returningId = 84; playerVisible = true; continue; }
         if (line == "take-backpack") { backpackPresent = false; continue; }
         if (line == "swap") { held = 2; continue; }
         if (line == "empty") { held = 0; continue; }
@@ -203,13 +228,16 @@ int main(int argc, char** argv) {
         if (line == "maphome") { differentMap = false; continue; }
         if (line == "events") eventStage = true;
         options.enabled = line != "off";
+        options.stashLootMask = line == "stash-keys" ? 1u << loot::VehicleKey : loot::kStashLoot;
         options.release = line == "hide" ? 0 : webmap::CurrentMap | webmap::Own | webmap::Heading | webmap::Loot;
         if (line == "players" || line == "names" || line == "events" || line == "held") options.release |= webmap::Players;
         if (line == "names" || line == "events") options.release |= webmap::PlayerNames;
         if (line == "held" || line == "events") options.release |= webmap::PlayerHeld;
-        if (line == "events") options.release |= webmap::Events | webmap::Corpses | webmap::PlayerHealth | webmap::StashLoot | webmap::Vehicles;
+        if (line == "events") options.release |= webmap::Events | webmap::Corpses | webmap::PlayerHealth | webmap::StashLoot | webmap::Vehicles | webmap::HighValues;
+        if (line == "high-values-only") options.release = webmap::CurrentMap | webmap::HighValues;
         if (line == "vehicles-only") options.release = webmap::CurrentMap | webmap::Vehicles;
         if (line == "stash-only") options.release = webmap::CurrentMap | webmap::Own | webmap::StashLoot;
+        if (line == "stash-keys") options.release |= webmap::StashLoot;
         if (line == "guests") options.release = webmap::CurrentMap | webmap::Players | webmap::PlayerNames | webmap::PlayerHeld;
         webmap::configure(options, argv[1]);
     }

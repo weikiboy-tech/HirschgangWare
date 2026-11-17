@@ -48,6 +48,10 @@ h2 { font-size: .75rem; letter-spacing: .09em; text-transform: uppercase; color:
 .field output { float: right; font-variant-numeric: tabular-nums; }
 .toggle { display: flex; justify-content: space-between; align-items: center; min-height: 1.85rem; gap: .6rem; font-size: .9rem; }
 .toggle input { width: 1.05rem; height: 1.05rem; flex-shrink: 0; }
+.stash-loot-row { display: flex; align-items: center; gap: .4rem; }
+.stash-loot-row > label { flex: 1; }
+#stash-loot-expand { width: 1.9rem; height: 1.9rem; flex-shrink: 0; padding: 0; }
+#stash-loot-options { margin-left: .65rem; padding-left: .7rem; border-left: 1px solid var(--border); }
 .actions { display: grid; grid-template-columns: repeat(4, 1fr); margin-top: .45rem; gap: .4rem; }
 .actions button { font-size: 1.18rem; }
 .hint { color: var(--muted); font-size: .8rem; margin: .2rem 0 .45rem; }

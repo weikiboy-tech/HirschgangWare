@@ -7,6 +7,8 @@
 #include "keyboard_bitmap.h"
 
 #include <cmath>
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -30,6 +32,10 @@ struct Cand {
     int kind = 0;  // 1 survivor, 2 infected, 3 animal, 4 vehicle
     bool isFriend = false;
     uint64_t id = 0;
+    struct Point { float x = 0, y = 0; };
+    std::array<Point, 32> region{};
+    unsigned regionSize = 0; // Zero retains point candidates for existing callers.
+    float maxTolerancePx = 0;
 };
 
 enum class InputSource { Legacy, MainPc, SecondPc, Box };
@@ -46,11 +52,11 @@ struct Config {
     int keyHid = 0;            // HID usage of the bound key (for the box side), 0 = unknown
     bool useBinary = true;     // MAKCU: use the binary input stream frames (DE AD ... 52)
     int delayMs = 50;    // dwell time before the shot
-    int radiusPx = 15;   // hit radius around the crosshair
+    int radiusPx = 1;    // requested edge tolerance, capped by each projected body region
     unsigned hitMask = H_Head | H_Neck | H_Spine | H_Pelvis;
     int maxDistM = 150;
-    int refireMs = 60;
-    int clickMs = 25;    // how long the synthetic button stays down
+    int refireMs = 25;   // minimum interval between click starts
+    int clickMs = 8;     // how long the synthetic button stays down
     bool modeNet = false;
     std::string port;
     int baud = 115200;
@@ -67,6 +73,7 @@ struct Config {
     bool autoConnect = true;
     bool moduleOpen = false;
     bool showDebug = false;
+    bool showRegions = false;
 };
 
 struct TargetMatch {
@@ -74,17 +81,55 @@ struct TargetMatch {
     float distanceSq = 0;
 };
 
+inline float segmentDistanceSq(Cand::Point p, Cand::Point a, Cand::Point b) {
+    const float x = b.x - a.x, y = b.y - a.y;
+    const float length = x * x + y * y;
+    const float t = length > 0 ? std::clamp(((p.x - a.x) * x + (p.y - a.y) * y) / length, 0.f, 1.f) : 0.f;
+    const float dx = p.x - a.x - t * x, dy = p.y - a.y - t * y;
+    return dx * dx + dy * dy;
+}
+
+inline float regionDistanceSq(const Cand& candidate, float x, float y) {
+    if (!candidate.regionSize) {
+        const float dx = candidate.x - x, dy = candidate.y - y;
+        return dx * dx + dy * dy;
+    }
+    if (candidate.regionSize < 3 || candidate.regionSize > candidate.region.size())
+        return INFINITY;
+    float best = INFINITY;
+    double area = 0;
+    bool positive = false, negative = false;
+    const Cand::Point p{x, y};
+    for (unsigned i = 0; i < candidate.regionSize; ++i) {
+        const auto a = candidate.region[i], b = candidate.region[(i + 1) % candidate.regionSize];
+        if (!std::isfinite(a.x) || !std::isfinite(a.y) || !std::isfinite(b.x) || !std::isfinite(b.y))
+            return INFINITY;
+        const float cross = (b.x - a.x) * (y - a.y) - (b.y - a.y) * (x - a.x);
+        const auto origin = candidate.region[0];
+        area += double(a.x - origin.x) * double(b.y - origin.y) - double(a.y - origin.y) * double(b.x - origin.x);
+        positive |= cross > 0;
+        negative |= cross < 0;
+        best = std::min(best, segmentDistanceSq(p, a, b));
+    }
+    if (!std::isfinite(area) || area == 0) return INFINITY;
+    return positive && negative ? best : 0.f;
+}
+
 // Geometry and configured filters are independent of the output device.
 inline TargetMatch targetAt(const Config& cfg, const std::vector<Cand>& cands, float cx, float cy) {
-    const float radius = float(cfg.radiusPx > 0 ? cfg.radiusPx : 1);
-    TargetMatch result{nullptr, radius * radius};
+    TargetMatch result{nullptr, INFINITY};
+    if (!std::isfinite(cx) || !std::isfinite(cy)) return result;
     for (const Cand& c : cands) {
         if (c.bone < 0 || c.bone >= 16 || !(cfg.hitMask & (1u << c.bone))) continue;
         if (c.kind != 1 && (cfg.playersOnly || (c.kind != 2 && !(c.kind == 3 && cfg.animals)))) continue;
         if (cfg.maxDistM > 0 && c.dist > float(cfg.maxDistM)) continue;
-        const float dx = c.x - cx, dy = c.y - cy;
-        const float d2 = dx * dx + dy * dy;
-        if (d2 <= result.distanceSq && (!result.candidate || d2 < result.distanceSq)) result = {&c, d2};
+        if (!std::isfinite(c.dist) || c.dist < 0) continue;
+        const float requested = float(std::max(0, cfg.radiusPx));
+        const float tolerance = c.regionSize ? std::min(requested, std::max(0.f, c.maxTolerancePx)) : requested;
+        const float d2 = regionDistanceSq(c, cx, cy);
+        if (std::isfinite(d2) && d2 <= tolerance * tolerance &&
+            (!result.candidate || d2 < result.distanceSq ||
+             (d2 == result.distanceSq && c.dist < result.candidate->dist))) result = {&c, d2};
     }
     return result;
 }
@@ -102,6 +147,7 @@ struct Live {
     std::string note;
     std::string lastRx;
     std::string clickStatus;
+    unsigned regionCount = 0;
 };
 
 Config& cfg();

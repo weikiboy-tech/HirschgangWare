@@ -55,6 +55,9 @@ struct EspSettings {
     float dzRadarMarker = 1.0f;
     unsigned dzLootCats = loot::kAll;
     unsigned dzRadarStashLoot = loot::kStashLoot;
+    bool dzRadarStashLootEnabled = true;
+    bool dzHighValues = true;
+    unsigned radarStashLootMask() const { return dzRadarStashLootEnabled ? dzRadarStashLoot : 0; }
     bool dzRadarHeadings = true;
     int dzRadarHeadingLen = 150;
     int dzFilterMode = 0;
@@ -64,6 +67,7 @@ struct EspSettings {
     int crosshairSize = 5;
     crosshair::Style crosshairStyle = crosshair::Style::Plus;
     COLORREF crosshairColor = crosshair::kDefaultColor;
+    COLORREF enemyColor = RGB(255, 78, 96);
 };
 
 struct DisplayInfo {

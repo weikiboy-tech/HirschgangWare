@@ -70,6 +70,10 @@ viewers (release bit 8192 mirrors the desktop setting).
 Viewers can enable or disable **Rucksäcke, Fahrzeugschlüssel & Stashes**
 under **Ebenen** independently of other viewers. The browser remembers
 their choice. The WebRadar accepts up to 512 markers on this layer.
+The small expand button beside this switch opens the three individual
+filters on both the desktop and the WebRadar. The group switch remembers
+the last individual choices. The host's choices determine which types
+are transmitted. Browser filters hide those types for that viewer.
 The browser draws the backpack, key, and stash as small icons. The live
 packet includes their coordinates and types.
 
@@ -90,7 +94,39 @@ class and position. Server-specific classes can be assigned in
 objects outside the client’s loaded tables are outside this data path.
 
 **Player names** shares available in-game names with authorized browsers for
-the Tracking dropdown and marker captions. **Held items** independently shares
+the Tracking dropdown and marker captions.
+
+**Als meinen Spieler speichern** stores the selected tracking target in the
+browser's local storage. The saved player stays selected while absent.
+An existing marker ID is preferred. If that ID changes, a unique visible
+player with the saved exact name can be selected automatically. Name
+matching needs the host's Player names release. Duplicate visible names
+leave the saved selection waiting. Follow and rotation resume according
+to the viewer's saved settings once the target becomes visible.
+The choice is scoped to that browser and WebRadar address.
+
+**Loot → High Valuables** is enabled by default and publishes its own
+`highValues` layer (release bit 16384), including when regular Ground Loot
+is off. Each browser can hide this layer. Small outlined cash symbols have
+fixed colours and carry no captions or pulse animation.
+
+The 102 exact classes in `src/high_value.h` were selected from
+[Ground Zero's published trader data](https://groundzerodayz.co/prices),
+dated November 2, 2026. The initial selection includes Rare Items with a
+listed maximum sale value of at least 10,000 rubles, other non-vehicle and
+non-vehicle-part items with at least 50,000 rubles, the High Value crafting
+category, and items sold for Bitcoin. These thresholds are an implementation
+choice. They describe a static list, with prices checked at implementation
+time. The existing `dayz_rare.txt` list has its own classification.
+
+[Ground Zero documents physical Bitcoin](https://groundzerodayz.co/guides/bitcoin-mining).
+Its precise ground-item class is still unverified on the live session.
+As a provisional rule, the complete name `Bitcoin` or a final
+`_Bitcoin` token is recognized, while mining-part names are excluded.
+For another class, add an explicit `highvalue ClassName` rule in
+`dayz_loot_cats.txt` and restart the launcher.
+
+**Held items** independently shares
 the same held-item names used by the desktop radar. The browser's **Labels**
 switch controls all captions. **Spielernamen auf Karte** and **Waffen auf
 Karte** independently control the two player lines and are saved per browser.

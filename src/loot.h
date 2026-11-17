@@ -26,6 +26,7 @@ enum Cat : int {
     Stash,
     VehicleKey,
     CoveredVehicle,
+    HighValue,
     Count
 };
 
@@ -69,9 +70,11 @@ Filter filter();
 bool listed(const std::string& name);
 
 bool visible(unsigned mask, int cat, const std::string& name);
-inline bool mapVisible(bool groundLoot, unsigned mask, unsigned stashLoot, int cat, const std::string& name) {
+inline bool mapVisible(bool groundLoot, unsigned mask, unsigned stashLoot, int cat, const std::string& name, bool highValues = false) {
+    if (cat == HighValue) return highValues;
     if (cat == CoveredVehicle) return shown(mask, cat);
-    return shown(stashLoot, cat) || (groundLoot && visible(mask, cat, name));
+    if (shown(kStashLoot, cat)) return shown(stashLoot, cat);
+    return groundLoot && visible(mask, cat, name);
 }
 
 std::string serializeList(const std::vector<FilterEntry>& list);

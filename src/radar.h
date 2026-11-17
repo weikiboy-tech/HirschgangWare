@@ -68,6 +68,9 @@ struct Config {
     bool loot = true;
     unsigned lootMask = ::loot::kAll;
     unsigned stashLootMask = ::loot::kStashLoot;
+    bool stashLootEnabled = true;
+    bool highValues = true;
+    unsigned activeStashLootMask() const { return stashLootEnabled ? stashLootMask : 0; }
     ::loot::Filter filter;
     bool animals = true;
     bool vehicles = true;
@@ -113,6 +116,7 @@ struct Config {
         int crosshairSize = 5;
         crosshair::Style crosshairStyle = crosshair::Style::Plus;
         COLORREF crosshairColor = crosshair::kDefaultColor;
+        COLORREF enemyColor = RGB(255, 78, 96);
     } esp;
     webmap::Options webmap;
     bool webmapChanged = false;

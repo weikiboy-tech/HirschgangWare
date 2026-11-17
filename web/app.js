@@ -1,13 +1,18 @@
 import { Camera, clamp, headingOnMap, radians, screenPoint, worldPoint } from "./map.js";
-import { CorpseVisibility, LiveConnection, healthLine, layers, playerLines, trackingTargets, validPlayerId } from "./live.js";
+import { CorpseVisibility, LiveConnection, healthLine, layers, playerLines, trackingTargets, validPlayerId,
+  savedPlayer, resolveSavedPlayer } from "./live.js";
 
 const $ = id => document.getElementById(id);
 const canvas = $("canvas"), ctx = canvas.getContext("2d");
 const defaults = { follow: false, rotate: false, smooth: true, duration: 120, places: true, labels: true,
   playerNames: true, heldItems: true, health: false,
-  grid: false, waypoints: true, markerSize: 7, autoMap: true, sidebar: null, map: "", filters: {}, points: [] };
+  grid: false, waypoints: true, markerSize: 7, autoMap: true, sidebar: null, map: "", filters: {}, stashKinds: {}, points: [] };
 const storageKey = "hirschgangware.webmap.v1";
 const targetKey = storageKey + ".target";
+const savedPlayerKey = storageKey + ".saved-player";
+let rememberedPlayer = null;
+try { rememberedPlayer = savedPlayer(JSON.parse(localStorage.getItem(savedPlayerKey))); } catch { /* Storage may be disabled. */ }
+let restoreRemembered = !!rememberedPlayer;
 const corpseKey = storageKey + ".hidden-corpses";
 let hiddenCorpses;
 try { hiddenCorpses = JSON.parse(sessionStorage.getItem(corpseKey)); } catch { /* Storage may be disabled. */ }
@@ -39,6 +44,7 @@ try {
   const savedTarget = sessionStorage.getItem(targetKey);
   if (validPlayerId(savedTarget)) trackingId = savedTarget;
 } catch { /* Storage may be disabled. */ }
+if (rememberedPlayer) trackingId = rememberedPlayer.id;
 const camera = new Camera(value => { $("follow").checked = prefs.follow = value; save(); redraw(); });
 camera.follow = prefs.follow;
 camera.rotate = prefs.rotate;
@@ -57,6 +63,8 @@ const stashLootIcons = {
 };
 const vehicleIcon = { color: "#a8c8fe", path: new Path2D(
   "M -8 4 V 0 L -5 -5 H 5 L 8 0 V 4 Z M -8 0 H 8 M -6 4 V 6 M 6 4 V 6 M -5 2 H -4 M 4 2 H 5") };
+const highValueIcon = { color: "#dacb8c", path: new Path2D(
+  "M 3 -3.5 C 1 -6 -4 -5 -3 -1.8 C -2 .4 3 -.2 3 2 C 3 5 -1 5 -3 3.5 M 0 -6 V 6") };
 const friendColor = "#3cff8c";
 const trackingOrder = new Intl.Collator("de", { numeric: true });
 const matchLive = () => live && selected && live.map === selected.id;
@@ -64,7 +72,7 @@ const pointsOnMap = () => prefs.points.filter(p => p.map === selected?.id);
 function trackingLabel(id) {
   const player = targets.get(id);
   if (id === "own") return player?.name ? player.name + " (eigene Position)" : "Eigene Position";
-  return player?.name || "Spieler " + id.split("-")[1];
+  return player?.name || (restoreRemembered && id === trackingId ? rememberedPlayer?.name : null) || "Spieler " + id.split("-")[1];
 }
 
 function bounds() {
@@ -290,7 +298,10 @@ function draw(now) {
       if (live.me) marker(trackedMarkerId === "own" ? camera.marker : live.me, prefs.markerSize, "#65f1d3",
         playerLines(live.me, null, prefs), false, healthLine(live.me, prefs.health));
       if (prefs.filters.vehicles !== false) for (const item of live.layers.vehicles ?? []) outlineMarker(item, vehicleIcon);
-      if (prefs.filters.stashLoot !== false) for (const item of live.layers.stashLoot ?? []) outlineMarker(item, stashLootIcons[item.kind]);
+      if (prefs.filters.highValues !== false) for (const item of live.layers.highValues ?? []) outlineMarker(item, highValueIcon);
+      if (prefs.filters.stashLoot !== false) for (const item of live.layers.stashLoot ?? []) {
+        if (prefs.stashKinds[item.kind] !== false) outlineMarker(item, stashLootIcons[item.kind]);
+      }
       if (prefs.filters.events !== false) for (const event of live.layers.events ?? []) eventMarker(event);
       for (const corpse of visibleCorpses(performance.now())) corpseMarker(corpse);
     }
@@ -301,6 +312,14 @@ function draw(now) {
 
 function syncTracking() {
   targets = trackingTargets(matchLive() ? live : null, prefs.filters.players !== false);
+  if (restoreRemembered) {
+    const resolved = resolveSavedPlayer(rememberedPlayer, targets);
+    if (resolved && resolved !== trackingId) {
+      trackingId = resolved;
+      rememberedPlayer = {...rememberedPlayer, id: resolved};
+      try { localStorage.setItem(savedPlayerKey, JSON.stringify(rememberedPlayer)); } catch { /* Storage may be disabled. */ }
+    }
+  }
   const target = targets.get(trackingId);
   const id = target ? trackingId : null;
   if (trackedMarkerId !== id) camera.updateMarker(null);
@@ -334,6 +353,11 @@ function syncTracking() {
     }));
   }
   select.value = trackingId;
+  $("save-player").disabled = !target;
+  const rememberedName = rememberedPlayer?.id === "own" ? "Eigene Position" :
+    rememberedPlayer?.name || "Spieler " + rememberedPlayer?.id.split("-")[1];
+  $("saved-player-status").textContent = !rememberedPlayer ? "" :
+    "Gespeichert · " + rememberedName + (restoreRemembered && !target ? " · nicht sichtbar" : "");
   $("center").disabled = !target;
   const oriented = Number.isFinite(target?.heading);
   $("orientation").textContent = prefs.rotate && oriented ? "Heading-Up" : "North-Up";
@@ -344,6 +368,7 @@ function syncTracking() {
 }
 
 function pickTarget(id) {
+  restoreRemembered = false;
   trackingId = id;
   try { sessionStorage.setItem(targetKey, id); } catch { /* Storage may be disabled. */ }
   syncTracking();
@@ -497,6 +522,9 @@ function updateLayers() {
   const vehicleStatus = $("vehicle-status");
   vehicleStatus.hidden = !hasMap || prefs.filters.vehicles === false || !!live.layers.vehicles;
   vehicleStatus.textContent = vehicleStatus.hidden ? "" : "Am Host unter Loot „Vehicles + Covered“ einschalten.";
+  const highValueStatus = $("high-values-status");
+  highValueStatus.hidden = !hasMap || prefs.filters.highValues === false || !!live.layers.highValues;
+  highValueStatus.textContent = highValueStatus.hidden ? "" : "Am Host unter Loot „High Valuables“ einschalten.";
   const box = $("released"), list = Object.keys(live?.layers ?? {}).filter(id => Object.hasOwn(layerNames, id));
   const stamp = list.join(",");
   if (box.dataset.layers === stamp) return;
@@ -568,6 +596,20 @@ $("zoom-in").onclick = () => adjustZoom(1.35);
 $("zoom-out").onclick = () => adjustZoom(1 / 1.35);
 $("center").onclick = () => { if (camera.marker) camera.setFollow(true); };
 $("tracking-target").onchange = () => pickTarget($("tracking-target").value);
+$("save-player").onclick = () => {
+  const player = targets.get(trackingId);
+  if (!player) return;
+  const selection = savedPlayer({id: trackingId, name: player.name});
+  try {
+    localStorage.setItem(savedPlayerKey, JSON.stringify(selection));
+    rememberedPlayer = selection;
+    restoreRemembered = true;
+  } catch {
+    $("saved-player-status").textContent = "Der Browser konnte die Auswahl nicht speichern.";
+    return;
+  }
+  syncTracking(); redraw();
+};
 $("fullscreen").onclick = async () => {
   try {
     if (document.fullscreenElement) await document.exitFullscreen();
@@ -617,9 +659,30 @@ $("stash-loot-layer").onchange = () => {
   prefs.filters.stashLoot = $("stash-loot-layer").checked;
   updateLayers(); save(); redraw();
 };
+const stashOptions = $("stash-loot-options"), stashExpand = $("stash-loot-expand");
+stashExpand.onclick = () => {
+  stashOptions.hidden = !stashOptions.hidden;
+  stashExpand.setAttribute("aria-expanded", String(!stashOptions.hidden));
+  stashExpand.setAttribute("aria-label", stashOptions.hidden ? "Loot-Typen einblenden" : "Loot-Typen ausblenden");
+  stashExpand.textContent = stashOptions.hidden ? "▸" : "▾";
+};
+for (const checkbox of stashOptions.querySelectorAll("[data-stash-kind]")) {
+  const kind = checkbox.dataset.stashKind;
+  if (typeof stored.stashKinds?.[kind] === "boolean") prefs.stashKinds[kind] = stored.stashKinds[kind];
+  checkbox.checked = prefs.stashKinds[kind] !== false;
+  checkbox.onchange = () => {
+    prefs.stashKinds[kind] = checkbox.checked;
+    save(); redraw();
+  };
+}
 $("vehicle-layer").checked = prefs.filters.vehicles !== false;
 $("vehicle-layer").onchange = () => {
   prefs.filters.vehicles = $("vehicle-layer").checked;
+  updateLayers(); save(); redraw();
+};
+$("high-values-layer").checked = prefs.filters.highValues !== false;
+$("high-values-layer").onchange = () => {
+  prefs.filters.highValues = $("high-values-layer").checked;
   updateLayers(); save(); redraw();
 };
 $("duration").value = prefs.duration;

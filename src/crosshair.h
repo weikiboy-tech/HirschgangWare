@@ -42,9 +42,11 @@ void draw(const RECT& view, Style style, int size, COLORREF color, Fill fill) {
 
     const bool ring = style == Style::Ring;
     const float circleRadius = ring ? radius : radius * 0.5f;
-    for (int border = 1; border >= 0; --border) {
+    // A single-pixel annulus keeps small rings open and avoids the thick
+    // inner and outer outline used by the filled dot.
+    for (int border = ring ? 0 : 1; border >= 0; --border) {
         const float outer = circleRadius + border;
-        const float inner = ring ? (std::max)(0.75f, circleRadius - 1.5f - border) : 0.f;
+        const float inner = ring ? circleRadius - 1.f : 0.f;
         const COLORREF ink = border ? outline : color;
         const RECT bounds = centered(x, y, outer, outer);
         for (LONG row = bounds.top; row < bounds.bottom; ++row) {

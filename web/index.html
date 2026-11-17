@@ -29,6 +29,8 @@
         <h2>Tracking</h2>
         <label class="field" for="tracking-target">Spieler auswählen</label>
         <select id="tracking-target"></select>
+        <button id="save-player" type="button">Als meinen Spieler speichern</button>
+        <p id="saved-player-status" class="hint" aria-live="polite"></p>
         <label class="toggle"><span>Auto-Follow</span><input id="follow" type="checkbox"></label>
         <label class="toggle"><span>Auto-Rotation</span><input id="rotate" type="checkbox"></label>
         <p id="orientation" class="hint">North-Up</p>
@@ -48,10 +50,20 @@
         <p class="hint" id="health-status" hidden></p>
         <label class="toggle"><span>Leichen auf Karte</span><input id="corpse-layer" type="checkbox"></label>
         <p class="hint" id="corpse-status" hidden></p>
-          <label class="toggle"><span>Rucksäcke, Fahrzeugschlüssel &amp; Stashes</span><input id="stash-loot-layer" type="checkbox"></label>
+          <div class="stash-loot-row">
+            <label class="toggle"><span>Rucksäcke, Fahrzeugschlüssel &amp; Stashes</span><input id="stash-loot-layer" type="checkbox"></label>
+            <button type="button" id="stash-loot-expand" aria-controls="stash-loot-options" aria-expanded="false" aria-label="Loot-Typen einblenden">▸</button>
+          </div>
+          <div id="stash-loot-options" hidden>
+            <label class="toggle"><span>Rucksäcke</span><input type="checkbox" data-stash-kind="backpack"></label>
+            <label class="toggle"><span>Fahrzeugschlüssel</span><input type="checkbox" data-stash-kind="vehicle-key"></label>
+            <label class="toggle"><span>Stashes</span><input type="checkbox" data-stash-kind="stash"></label>
+          </div>
           <p class="hint" id="stash-loot-status" hidden></p>
           <label class="toggle"><span>Fahrzeuge</span><input id="vehicle-layer" type="checkbox"></label>
           <p class="hint" id="vehicle-status" hidden></p>
+          <label class="toggle"><span>High Valuables</span><input id="high-values-layer" type="checkbox"></label>
+          <p class="hint" id="high-values-status" hidden></p>
         <label class="toggle"><span>Koordinatengitter</span><input id="grid" type="checkbox"></label>
         <label class="toggle"><span>Wegpunkte</span><input id="waypoints" type="checkbox"></label>
         <label class="field" for="marker-size">Markergröße</label>

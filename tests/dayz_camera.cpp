@@ -1,5 +1,10 @@
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include "../src/dayz_camera.h"
+#include "../src/overlay_motion.h"
 #include "../src/trigger.h"
+#include "../src/trigger_geometry.h"
 
 #include <winsock2.h>
 #include <windows.h>
@@ -12,7 +17,111 @@
 
 using namespace dayz_camera;
 
+void testBodyRegions() {
+    const Cam camera{{1,0,0},{0,1,0},{0,0,1},{0,0,0},1.f,.5625f};
+    const std::array<Vec3,16> body{{
+        {0,1.7f,10},{0,1.5f,10},{0,1.2f,10},{0,.9f,10},
+        {-.22f,1.43f,10},{-.36f,1.15f,10},{-.4f,.92f,10},
+        {.22f,1.43f,10},{.36f,1.15f,10},{.4f,.92f,10},
+        {-.12f,.85f,10},{-.12f,.45f,10},{-.12f,0,10},
+        {.12f,.85f,10},{.12f,.45f,10},{.12f,0,10}
+    }};
+    trigger::Cand identity;
+    identity.id=7; identity.kind=1; identity.dist=10;
+    trigger::Config config;
+    config.hitMask=trigger::H_All;
+    config.radiusPx=4;
+    for (const auto lens : {1.f,.2f,.04f}) {
+        for (const auto size : {std::pair<int,int>{1920,1080},{2560,1440},{1440,1080}}) {
+            Cam view=camera; view.px=lens; view.py=lens*float(size.second)/float(size.first);
+            // Keep the synthetic body inside a narrow scope's visible frame.
+            view.pos.y=.9f;
+            std::vector<trigger::Cand> regions;
+            const trigger_geometry::Viewport viewport{7,9,float(size.first+7),float(size.second+9)};
+            trigger_geometry::appendBody(view,viewport,body,1000000,1001000,identity,regions);
+            assert(regions.size()==16);
+            const auto matches = [&](Vec3 world) {
+                float x,y;
+                assert(toScreen(view,world,float(size.first),float(size.second),x,y));
+                return trigger::targetAt(config,regions,x+7,y+9).candidate;
+            };
+            assert(matches({0,1.35f,10})); // Gap between neck and spine is now covered.
+            assert(matches({0,1.05f,10})); // Gap between spine and pelvis.
+            assert(matches({0,1.7f,10}));  // Head center.
+            assert(matches({-.29f,1.29f,10})); // Upper-arm interior.
+            assert(matches({-.12f,.25f,10})); // Lower-leg interior.
+            assert(!matches({.6f,1.2f,10}));  // Outside the torso.
+            assert(!matches({0,.1f,10}));    // Gap between the legs stays empty.
+            config.radiusPx=60;
+            assert(!matches({.6f,1.2f,10})); // High legacy radii cannot inflate regions.
+            config.radiusPx=0;
+            assert(matches({0,1.35f,10}));
+            config.hitMask=trigger::H_Head;
+            assert(!matches({0,1.35f,10}));
+            assert(matches({0,1.7f,10}));
+            config.hitMask=trigger::H_All;
+            config.radiusPx=4;
+        }
+    }
+    std::vector<trigger::Cand> regions;
+    const trigger_geometry::Viewport viewport{0,0,1920,1080};
+    trigger_geometry::appendBody(camera,viewport,body,1000000,1075000,identity,regions);
+    assert(regions.empty()); // Exact freshness boundary.
+    trigger_geometry::appendBody(camera,viewport,body,1000000,999999,identity,regions);
+    assert(regions.empty());
+    auto missing=body;
+    for (auto& joint:missing) joint={NAN,NAN,NAN};
+    trigger_geometry::appendBody(camera,viewport,missing,1000000,1001000,identity,regions);
+    assert(regions.empty());
+    auto behind=body;
+    for(auto& joint:behind) joint.z=-10;
+    trigger_geometry::appendBody(camera,viewport,behind,1000000,1001000,identity,regions);
+    assert(regions.empty());
+    auto moved=body;
+    for(auto& joint:moved) joint.x+=.7f;
+    trigger_geometry::appendBody(camera,viewport,moved,1000000,1001000,identity,regions);
+    float x,y;
+    assert(toScreen(camera,{.7f,1.35f,10},1920,1080,x,y));
+    assert(trigger::targetAt(config,regions,x,y).candidate);
+    assert(toScreen(camera,{0,1.35f,10},1920,1080,x,y));
+    assert(!trigger::targetAt(config,regions,x,y).candidate);
+    auto invalid=regions.front();
+    invalid.region[0].x=NAN;
+    assert(!trigger::targetAt(config,{invalid},invalid.x,invalid.y).candidate);
+    invalid.regionSize=3;
+    invalid.region[0]=invalid.region[1]=invalid.region[2]={0,0};
+    assert(!trigger::targetAt(config,{invalid},0,0).candidate);
+    config.maxDistM=5;
+    assert(!trigger::targetAt(config,regions,regions[0].x,regions[0].y).candidate);
+    config.maxDistM=120;
+    auto lying=body;
+    for(auto& joint:lying) {
+        const float oldX=joint.x;
+        joint.x=joint.y;
+        joint.y=-oldX;
+    }
+    regions.clear();
+    trigger_geometry::appendBody(camera,viewport,lying,1000000,1001000,identity,regions);
+    assert(toScreen(camera,{1.35f,0,10},1920,1080,x,y));
+    assert(trigger::targetAt(config,regions,x,y).candidate);
+    assert(toScreen(camera,{1.35f,.6f,10},1920,1080,x,y));
+    assert(!trigger::targetAt(config,regions,x,y).candidate);
+}
+
 int main() {
+    testBodyRegions();
+    const uint64_t sample = 1000000;
+    assert(overlay_motion::leadSeconds(0, sample) == 0.f);
+    assert(overlay_motion::leadSeconds(sample, sample - 1) == 0.f);
+    assert(std::fabs(overlay_motion::leadSeconds(sample, sample + 10000) - .01f) < 1e-6f);
+    for (uint64_t age = 1; age < 100000; ++age) {
+        const float before = overlay_motion::leadSeconds(sample, sample + age - 1);
+        const float after = overlay_motion::leadSeconds(sample, sample + age);
+        assert(after >= 0 && after <= .05f);
+        assert(std::fabs(after - before) < .000005f);
+    }
+    assert(overlay_motion::leadSeconds(sample, sample + 80000) == 0.f);
+    assert(overlay_motion::leadSeconds(sample, sample + 300000) == 0.f);
     // Capture the actual overlay fill calls and check their pixel symmetry
     // around the same center used by target detection.
     for (int width : {64, 65}) for (int height : {64, 65}) {
@@ -32,14 +141,20 @@ int main() {
                             pixels[(y - viewport.top) * width + x - viewport.left] = color;
                 });
                 bool hasForeground = false;
+                int ringPixels = 0;
                 for (int y = 0; y < height; ++y) for (int x = 0; x < width; ++x) {
                     const auto pixel = pixels[y * width + x];
+                    if (shape == crosshair::Style::Ring && pixel) {
+                        assert(pixel == crosshair::kDefaultColor);
+                        ++ringPixels;
+                    }
                     assert(pixel == pixels[y * width + width - 1 - x]);
                     assert(pixel == pixels[(height - 1 - y) * width + x]);
                     hasForeground |= pixel == crosshair::kDefaultColor;
                 }
                 const auto centerPixel = pixels[(height / 2) * width + width / 2];
                 assert(hasForeground);
+                if (shape == crosshair::Style::Ring) assert(ringPixels <= 8 * size + 8);
                 assert(centerPixel == (shape == crosshair::Style::Ring ? 0 : crosshair::kDefaultColor));
             }
         }
@@ -186,9 +301,57 @@ int main() {
     trigger::update({}, 0, 0, false);
     receive(output.cmdUp);
     assert(live.clicks == 1);
+    output.refireMs = 25;
+    output.clickMs = 8;
+    const auto repeatStart = GetTickCount64();
+    live.keyHeld = true;
+    int completed = live.clicks;
+    // Exercise repeated downs/ups through the real output state machine.
+    while (live.clicks < 4 && GetTickCount64() - repeatStart < 1000) {
+        trigger::update(targets, 639.5f, 359.5f, true);
+        if (live.clicks > completed) {
+            receive(output.cmdDown);
+            receive(output.cmdUp);
+            completed = live.clicks;
+        }
+        Sleep(1);
+    }
+    assert(live.clicks == 4);
+    assert(GetTickCount64() - repeatStart >= 50);
+    live.keyHeld = false;
+    for (int i = 0; i < 40; ++i) {
+        trigger::update(targets, 639.5f, 359.5f, true);
+        Sleep(1);
+    }
+    assert(live.clicks == 4);
+    live.keyHeld = true;
+    for (int i = 0; i < 40; ++i) {
+        trigger::update({}, 639.5f, 359.5f, true);
+        Sleep(1);
+    }
+    assert(live.clicks == 4);
+    trigger::Cand area;
+    area.id=99; area.kind=1; area.dist=20; area.bone=2;
+    area.x=639.5f; area.y=340;
+    area.regionSize=4;
+    area.region[0]={637.5f,335}; area.region[1]={641.5f,335};
+    area.region[2]={641.5f,385}; area.region[3]={637.5f,385};
+    area.maxTolerancePx=.2f;
+    const auto areaStart=GetTickCount64();
+    while(live.clicks<5 && GetTickCount64()-areaStart<1000) {
+        trigger::update({area},639.5f,359.5f,true);
+        Sleep(1);
+    }
+    assert(live.regionCount==1 && live.clicks==5);
+    receive(output.cmdDown); receive(output.cmdUp);
+    for(int i=0;i<40;++i) {
+        trigger::update({area},645.f,359.5f,true);
+        Sleep(1);
+    }
+    assert(!live.target && live.clicks==5);
     output.cmdDown.clear();
     trigger::clickOnce();
-    assert(live.clicks == 1 && !live.clickStatus.empty());
+    assert(live.clicks == 5 && !live.clickStatus.empty());
     trigger::disconnectDevice();
     closesocket(receiver);
     WSACleanup();

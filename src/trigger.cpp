@@ -640,9 +640,10 @@ void load() {
         else if (k == "autoconnect") gCfg.autoConnect = toBool(v, gCfg.autoConnect);
         else if (k == "moduleopen") gCfg.moduleOpen = toBool(v, gCfg.moduleOpen);
         else if (k == "showdebug") gCfg.showDebug = toBool(v, gCfg.showDebug);
+        else if (k == "showregions") gCfg.showRegions = toBool(v, gCfg.showRegions);
     }
     if (gCfg.delayMs < 0) gCfg.delayMs = 0;
-    if (gCfg.radiusPx < 1) gCfg.radiusPx = 1;
+    gCfg.radiusPx = std::clamp(gCfg.radiusPx, 0, 4);
     if (!sawCmdMonitor) gCfg.cmdMonitor = monitorPresetText(gCfg.monitorIdx);
     if (GetFileAttributesA(iniPath().c_str()) == INVALID_FILE_ATTRIBUTES) save();
 }
@@ -689,6 +690,7 @@ void save() {
     f << "autoConnect=" << (gCfg.autoConnect ? 1 : 0) << "\n";
     f << "moduleOpen=" << (gCfg.moduleOpen ? 1 : 0) << "\n";
     f << "showDebug=" << (gCfg.showDebug ? 1 : 0) << "\n";
+    f << "showRegions=" << (gCfg.showRegions ? 1 : 0) << "\n";
 }
 
 int keyToVk(int key) {
@@ -834,7 +836,8 @@ bool captureInputs() {
 }
 
 bool remoteMouseSettling(ULONGLONG now) {
-    return usesRemote() && gCfg.key >= 1 && gCfg.key <= 5 &&
+    // Only the left-button binding can be fed back by our synthetic left click.
+    return usesRemote() && gCfg.key == 1 &&
            (gDownAt || (gOutputReleasedAt && now - gOutputReleasedAt < 40));
 }
 
@@ -933,6 +936,10 @@ void update(const std::vector<Cand>& cands, float cx, float cy, bool projectionR
     gLive.px = best ? std::sqrt(match.distanceSq) : 0.f;
     gLive.dist = best ? best->dist : 0.f;
     gLive.heldMs = 0;
+    gLive.regionCount = 0;
+    for (const auto& candidate : cands)
+        if (candidate.regionSize >= 3 && candidate.bone >= 0 && candidate.bone < 16 &&
+            (gCfg.hitMask & (1u << candidate.bone))) ++gLive.regionCount;
     if (!connected()) {
         gHaveArmed = false;
         gArmedId = 0;
@@ -953,11 +960,12 @@ void update(const std::vector<Cand>& cands, float cx, float cy, bool projectionR
     }
     if (!probing() && gCfg.useBinary && !gCfg.modeNet && (gStreamLost || now - gLastStreamOn > 10000)) sendStreams();
 
-    if (gDownAt && now - gDownAt >= (ULONGLONG)std::max(2, gCfg.clickMs)) {
+    const bool active = gCfg.enabled && best && gLive.keyHeld;
+    if (gDownAt && (!active || now - gDownAt >= (ULONGLONG)std::max(2, gCfg.clickMs))) {
         if (!finishClick(now)) gDownAt = now;  // Retry after the configured button interval.
     }
 
-    if (!gCfg.enabled || !best || !gLive.keyHeld) {
+    if (!active) {
         gHaveArmed = false;
         gArmedId = 0;
         return;
@@ -969,6 +977,8 @@ void update(const std::vector<Cand>& cands, float cx, float cy, bool projectionR
     }
     gLive.heldMs = int(now - gArmedAt);
     if (gDownAt || remoteMouseSettling(now)) return;
+    // Ensure the device receives a distinct button-up interval between clicks.
+    if (gOutputReleasedAt && now - gOutputReleasedAt < 2) return;
     if (now - gArmedAt < (ULONGLONG)gCfg.delayMs) return;
     if (gLastShot && now - gLastShot < (ULONGLONG)std::max(1, gCfg.refireMs)) return;
     gLastShot = now;

@@ -1,4 +1,4 @@
-export const layers = ["players", "infected", "animals", "vehicles", "loot", "events", "corpses", "stashLoot"];
+export const layers = ["players", "infected", "animals", "vehicles", "loot", "events", "corpses", "stashLoot", "highValues"];
 const stashLootKinds = ["backpack", "vehicle-key", "stash"];
 const corpseLifetime = 7 * 60 * 1000;
 const eventKinds = ["airdrop", "helicopter-crash", "loot-cluster"];
@@ -25,6 +25,19 @@ export function trackingTargets(snapshot, showPlayers) {
     ...(snapshot?.me ? [["own", snapshot.me]] : []),
     ...players.filter(p => p.id).map(p => [p.id, p]),
   ]);
+}
+
+export function savedPlayer(value) {
+  if (!value || (value.id !== "own" && !validPlayerId(value.id))) return null;
+  return {id: value.id, name: shortText(value.name)};
+}
+
+export function resolveSavedPlayer(saved, targets) {
+  if (!saved) return null;
+  if (targets.has(saved.id)) return saved.id;
+  if (saved.id === "own" || !saved.name) return null;
+  const matches = [...targets].filter(([id, player]) => id !== "own" && player.name === saved.name);
+  return matches.length === 1 ? matches[0][0] : null;
 }
 
 export function decode(raw) {
@@ -62,6 +75,10 @@ export function decode(raw) {
     if (key === "vehicles") {
       if (!dots.every(p => p.covered === undefined || typeof p.covered === "boolean")) return null;
       safe.vehicles = dots.map(({x, z, covered}) => ({x, z, covered: covered === true}));
+      continue;
+    }
+    if (key === "highValues") {
+      safe.highValues = dots.map(({x, z}) => ({x, z}));
       continue;
     }
     const playerIds = new Set();

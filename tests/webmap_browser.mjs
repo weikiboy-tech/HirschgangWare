@@ -65,6 +65,7 @@ try {
       let body = first.toString();
       const verify = () => {
         if (body.includes('"name":"private-player"') && body.includes('"friend":true') &&
+            body.includes('"highValues":[{"x":520,"z":940},{"x":630,"z":940}]') &&
             body.includes('"vehicles":[{"x":490,"z":1080},{"x":710,"z":1080,"covered":true}]') &&
             body.includes('"stashLoot":[{"x":450,"z":960,"kind":"backpack"},{"x":560,"z":960,"kind":"vehicle-key"},{"x":670,"z":960,"kind":"stash"}]')) {
           done(101); client.destroy();
@@ -115,7 +116,7 @@ try {
       for (const name of ["clearRect", "arc", "moveTo", "lineTo", "stroke", "fillText", "fill"]) {
         const original = p[name];
         p[name] = function (...args) {
-          if (name === "clearRect") window.paint = { strokes: [], names: [], fills: [], events: [], corpses: [], stashIcons: [], cars: [] };
+          if (name === "clearRect") window.paint = { strokes: [], names: [], fills: [], events: [], corpses: [], stashIcons: [], cars: [], valuables: [] };
           if (name === "arc") this.lastArc = args;
           if (name === "moveTo") { this.segment = null; this.start = args; }
           if (name === "lineTo") this.segment = args;
@@ -131,6 +132,10 @@ try {
           if (name === "stroke" && args[0] instanceof Path2D && this.strokeStyle === "#a8c8fe") {
             const m = this.getTransform();
             window.paint.cars.push({x: m.e, y: m.f});
+          }
+          if (name === "stroke" && args[0] instanceof Path2D && this.strokeStyle === "#dacb8c") {
+            const m = this.getTransform();
+            window.paint.valuables.push({x: m.e, y: m.f});
           }
           if (name === "fillText") window.paint.names.push(args[0]);
           if (name === "fill") {
@@ -154,6 +159,7 @@ try {
       for (const type of ["mousePressed", "mouseReleased"])
         await call("Input.dispatchMouseEvent", {type, x, y, button: "left", clickCount: 1}, sessionId);
     };
+    evaluate.reload = () => call("Page.reload", {}, sessionId);
     return evaluate;
   }
   const host = await browser(), guest = await browser();
@@ -167,6 +173,15 @@ try {
     await until(() => evaluate("paint.events.length === 3 && paint.names.includes('Airdrop') && paint.names.includes('Loot-Häufung') && paint.names.includes('Helikopterabsturz')"), "three named event markers");
   }
   const eventPositions = (await host("paint.events")).sort((a, b) => a.x - b.x);
+  const highValues = await until(() => host("paint.valuables.length === 2 && paint.valuables"), "high value cash symbols visible");
+  assert.ok(highValues[0].x < highValues[1].x && highValues[0].y === highValues[1].y);
+  assert.equal(await host("paint.names.some(name => /GZ_Bitcoin|GZEFT_LEDX|High Valuables/.test(name))"), false);
+  await host("document.querySelector('#high-values-layer').click()");
+  await until(() => host("paint.valuables.length === 0"), "high value browser switch hides cash symbols");
+  assert.equal(await guest("paint.valuables.length"), 2);
+  assert.equal(await host("JSON.parse(localStorage.getItem('hirschgangware.webmap.v1')).filters.highValues"), false);
+  await host("document.querySelector('#high-values-layer').click()");
+  await until(() => host("paint.valuables.length === 2"), "high value cash symbols restored");
   const vehicles = await until(() => host("paint.cars.length === 2 && paint.cars"), "normal and covered vehicle icons");
   assert.ok(vehicles[0].x < vehicles[1].x && vehicles[0].y === vehicles[1].y);
   assert.equal(await host("paint.names.some(name => /Fahrzeuge|TestCar|Motorbike_Red_Cover/.test(name))"), false);
@@ -181,11 +196,24 @@ try {
   assert.ok(stashIcons[0].x < stashIcons[1].x && stashIcons[1].x < stashIcons[2].x);
   assert.ok(stashIcons.every(icon => icon.y === stashIcons[0].y));
   assert.equal(await host("paint.names.some(name => /HuntingBag|ExpansionCarKey|UndergroundStash|Rucksack|Fahrzeugschlüssel|^Stash$/.test(name))"), false);
+  assert.equal(await host("document.querySelector('#stash-loot-options').hidden"), true);
+  await host("document.querySelector('#stash-loot-expand').click()");
+  assert.equal(await host("document.querySelector('#stash-loot-expand').getAttribute('aria-expanded')"), "true");
+  await host("document.querySelector('[data-stash-kind=backpack]').click()");
+  await until(() => host("paint.stashIcons.length === 2 && !paint.stashIcons.some(i => i.color === '#e0a377')"), "individual backpack filter");
+  assert.equal(await guest("paint.stashIcons.length"), 3);
+  await host("document.querySelector('#stash-loot-expand').click()");
+  assert.equal(await host("document.querySelector('#stash-loot-options').hidden"), true);
   await host("document.querySelector('#stash-loot-layer').click()");
   await until(() => host("paint.stashIcons.length === 0"), "stash loot switch removes all three icons");
   assert.equal(await host("JSON.parse(localStorage.getItem('hirschgangware.webmap.v1')).filters.stashLoot"), false);
   assert.equal(await guest("paint.stashIcons.length"), 3);
   await host("document.querySelector('#stash-loot-layer').click()");
+  await until(() => host("paint.stashIcons.length === 2 && !document.querySelector('[data-stash-kind=backpack]').checked"), "master restores the saved individual selection");
+  assert.equal(await host("JSON.parse(localStorage.getItem('hirschgangware.webmap.v1')).stashKinds.backpack"), false);
+  await host("document.querySelector('#stash-loot-expand').click()");
+  await host("document.querySelector('[data-stash-kind=backpack]').click()");
+  await host("document.querySelector('#stash-loot-expand').click()");
   await until(() => host("paint.stashIcons.length === 3"), "stash loot enabled again");
   assert.equal(await host("paint.names.includes('HP 75')"), false);
   await host("document.querySelector('#health').click()");
@@ -258,6 +286,7 @@ try {
   await until(() => guest("!document.querySelector('#corpse-status').hidden && document.querySelector('#corpse-status').textContent.includes('Corpses') && document.querySelector('#corpse-layer').checked"), "corpse toggle and missing host release guidance");
   await until(() => guest("paint.stashIcons.length === 0 && !document.querySelector('#stash-loot-status').hidden"), "stash icons removed when host revokes release");
   await until(() => guest("paint.cars.length === 0 && !document.querySelector('#vehicle-status').hidden"), "vehicle icons removed when host revokes release");
+  await until(() => guest("paint.valuables.length === 0 && !document.querySelector('#high-values-status').hidden"), "high value release withdrawn");
   fixture.stdin.write("held\n");
   await until(() => guest("paint.names.includes('GZ_SecondRifle') && !paint.names.some(t => t.startsWith('private-player'))"), "name release withdrawn independently");
   fixture.stdin.write("events\n");
@@ -282,6 +311,17 @@ try {
   }, "guest reconnects and retains target while own marker is absent");
   fixture.stdin.write("unfriend\n");
   await until(() => guest("paint.strokes.some(s=>s.color === '#fb8d9d' && s.angle === 0) && !paint.fills.includes('#3cff8c')"), "friend marker updates to red");
+  await guest("document.querySelector('#save-player').click()");
+  await until(() => guest("document.querySelector('#saved-player-status').textContent.includes('private-player')"), "selected player saved");
+  assert.equal(await host("localStorage.getItem('hirschgangware.webmap.v1.saved-player')"), null);
+  fixture.stdin.write("player-away\n");
+  await until(() => guest("document.querySelector('#tracking-target').selectedOptions[0]?.textContent.includes('private-player') && document.querySelector('#saved-player-status').textContent.includes('nicht sichtbar')"), "saved player retained outside detection range");
+  await guest.reload();
+  await until(() => guest("document.querySelector('#saved-player-status')?.textContent.includes('private-player') && document.querySelector('#tracking-target').selectedOptions[0]?.textContent.includes('nicht sichtbar')"), "saved player restored after browser reload while absent");
+  fixture.stdin.write("player-return\n");
+  await until(() => guest("document.querySelector('#tracking-target').value.endsWith('-84') && !document.querySelector('#tracking-target').selectedOptions[0].textContent.includes('nicht sichtbar')"), "saved player reacquired with a new marker id");
+  await guest("if (!document.querySelector('#follow').checked) document.querySelector('#follow').click()");
+  await until(() => guest(aligned.replace("#3cff8c", "#fb8d9d")), "reacquired player follows and rotates");
   fixture.stdin.write("events\n");
   await until(() => host("paint.events.length === 3"), "events ready before map change");
   fixture.stdin.write("mapchange\n");

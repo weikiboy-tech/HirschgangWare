@@ -575,6 +575,11 @@ void drawGlyph(ImDrawList* dl, ImVec2 c, float s, int glyph, ImU32 col, ImU32 bg
             g.circle(-0.54f, 0.48f, 0.19f, col);
             g.circle(0.54f, 0.48f, 0.19f, col);
             break;
+        case loot::HighValue:
+            dl->AddBezierCubic(g.P(.5f, -.48f), g.P(-.4f, -.9f), g.P(-.8f, 0), g.P(0, -.05f), col, stroke);
+            dl->AddBezierCubic(g.P(0, -.05f), g.P(.8f, 0), g.P(.4f, .9f), g.P(-.5f, .48f), col, stroke);
+            g.line(0, -.95f, 0, .95f, col, stroke);
+            break;
         case loot::Rare: {
             ImVec2 v[10];
             for (int i = 0; i < 10; ++i) {
@@ -662,7 +667,7 @@ Counts countDots(const Frame& f, const Config& cfg, bool names) {
             case Icon::Loot:
                 if (d.cat >= 0 && d.cat < loot::Count) ++n.cat[d.cat];
                 ++n.lootTotal;
-                if (loot::mapVisible(cfg.loot, cfg.lootMask, cfg.stashLootMask, d.cat, d.label)) ++n.lootShown;
+                if (loot::mapVisible(cfg.loot, cfg.lootMask, cfg.activeStashLootMask(), d.cat, d.label, cfg.highValues)) ++n.lootShown;
                 if (names && !d.label.empty()) ++n.names[d.label];
                 break;
             case Icon::Survivor: ++n.survivors; break;
@@ -804,7 +809,7 @@ void drawRadar(const Frame& f, Config& cfg, const Counts& n) {
         for (const Dot& d : f.dots) {
             if (order(d.icon) != pass) continue;
             if ((d.icon == Icon::Infected && !cfg.infected) || (d.icon == Icon::Vehicle && !cfg.vehicles)) continue;
-            if (d.icon == Icon::Loot && !loot::mapVisible(cfg.loot, cfg.lootMask, cfg.stashLootMask, d.cat, d.label)) continue;
+            if (d.icon == Icon::Loot && !loot::mapVisible(cfg.loot, cfg.lootMask, cfg.activeStashLootMask(), d.cat, d.label, cfg.highValues)) continue;
             const float px = sx(d.x), py = sy(d.z);
             if (px < left - 12 || px >= w + 12 || py < -12 || py >= h + 12) continue;
             const ImVec2 c(px, py);
@@ -812,6 +817,11 @@ void drawRadar(const Frame& f, Config& cfg, const Counts& n) {
             switch (d.icon) {
                 case Icon::Loot: {
                     const ImU32 col = col32(loot::info(d.cat).color);
+                    if (d.cat == loot::HighValue) {
+                        r = 6.f * scale;
+                        drawGlyph(dl, c, r, d.cat, col, th::Edge);
+                        break;
+                    }
                     const bool rare = d.cat == loot::Rare;
                     if (rare) {
                         const float pulse = 0.5f + 0.5f * std::sin(t * 3.5f);
@@ -860,7 +870,7 @@ void drawRadar(const Frame& f, Config& cfg, const Counts& n) {
                 text += player_health::label(d.health);
             }
             if (text.empty()) continue;
-            if (d.icon == Icon::Loot && d.cat != loot::Rare && !loot::shown(cfg.stashLootMask, d.cat)) {
+            if (d.icon == Icon::Loot && d.cat != loot::Rare && !loot::shown(cfg.activeStashLootMask(), d.cat)) {
                 const float dx = d.x - f.meX, dz = d.z - f.meZ;
                 if (dx * dx + dz * dz > float(cfg.lootLabelRange) * float(cfg.lootLabelRange)) continue;
             }
@@ -1143,14 +1153,23 @@ bool toggleSwitch(const char* id, bool* v) {
     return clicked;
 }
 
-bool switchRow(const char* label, bool* v, const char* popup = nullptr) {
+bool switchRow(const char* label, bool* v, const char* popup = nullptr, bool* expanded = nullptr) {
     const float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
     ImGui::AlignTextToFramePadding();
+    if (expanded) ImGui::PushTextWrapPos(right - 62.f);
     ImGui::TextUnformatted(label);
+    if (expanded) ImGui::PopTextWrapPos();
     if (popup) {
         ImGui::SameLine();
         if (ImGui::SmallButton("Edit##crosshair")) ImGui::OpenPopup(popup);
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", popup);
+    }
+    if (expanded) {
+        ImGui::SameLine(right - 56.f);
+        ImGui::PushID(label);
+        if (ImGui::SmallButton(*expanded ? "-" : "+")) *expanded = !*expanded;
+        ImGui::PopID();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Individual loot types");
     }
     ImGui::SameLine(right - 32.f);
     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 2.f);
@@ -1356,8 +1375,12 @@ void drawTriggerSection(bool& ch) {
     int d = tc.delayMs;
     ImGui::PushItemWidth(-1);
     if (ImGui::SliderInt("##tdelay", &d, 0, 500, "trigger delay %d ms")) { tc.delayMs = d; trigger::touch(); }
+    int repeat = tc.refireMs;
+    if (ImGui::SliderInt("##trepeat", &repeat, 5, 400, "click interval %d ms")) { tc.refireMs = repeat; trigger::touch(); }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Repeats while the bound key is held and a target is under the crosshair.");
     int rp = tc.radiusPx;
-    if (ImGui::SliderInt("##tradius", &rp, 1, 60, "hit radius %d px")) { tc.radiusPx = rp; trigger::touch(); }
+    if (ImGui::SliderInt("##tradius", &rp, 0, 4, "edge tolerance %d px")) { tc.radiusPx = rp; trigger::touch(); }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Body regions determine the hit area. Extra tolerance is capped at 1 px and 10%% of the region radius.");
     ImGui::PopItemWidth();
 
     if (chip(tc.moduleOpen ? "Close triggerbot module##tm" : "Open triggerbot module##tm", tc.moduleOpen, ImGui::GetContentRegionAvail().x)) {
@@ -1476,7 +1499,8 @@ void drawTriggerWindow(bool& ch) {
         ImGui::PushItemWidth(-1);
         if (ImGui::SliderInt("##mdelay", &d, 0, 500, "trigger delay %d ms")) { tc.delayMs = d; trigger::touch(); }
         int rp = tc.radiusPx;
-        if (ImGui::SliderInt("##mradius", &rp, 1, 60, "hit radius %d px")) { tc.radiusPx = rp; trigger::touch(); }
+        if (ImGui::SliderInt("##mradius", &rp, 0, 4, "edge tolerance %d px")) { tc.radiusPx = rp; trigger::touch(); }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Body regions determine the hit area. Extra tolerance is capped at 1 px and 10%% of the region radius.");
         int md = tc.maxDistM;
         if (ImGui::SliderInt("##mdist", &md, 1, 500, "targeting distance %d m")) { tc.maxDistM = md; trigger::touch(); }
         int rf = tc.refireMs;
@@ -1486,6 +1510,7 @@ void drawTriggerWindow(bool& ch) {
         ImGui::PopItemWidth();
 
         section("HITBOXES");
+        if (switchRow("Show body regions", &tc.showRegions)) trigger::touch();
         for (int i = 0; i < 16; ++i) {
             const bool hbon = (tc.hitMask & (1u << i)) != 0;
             char hb[40];
@@ -1510,6 +1535,7 @@ void drawTriggerWindow(bool& ch) {
         ImGui::SameLine();
         ImGui::TextDisabled("clicks sent: %d", lv.clicks);
         ImGui::Text("target under crosshair: %s", !lv.projectionReady ? "camera unavailable" : (lv.target ? "yes" : "no"));
+        ImGui::TextDisabled("Fresh body regions: %u", lv.regionCount);
         if (lv.target) ImGui::TextDisabled("%s  %.0f m  %.0f px   held %d ms", trigger::boneName(lv.bone), lv.dist, lv.px, lv.heldMs);
         if (!lv.note.empty()) ImGui::TextDisabled("%s", lv.note.c_str());
         if (!lv.clickStatus.empty()) ImGui::TextWrapped("%s", lv.clickStatus.c_str());
@@ -1569,6 +1595,12 @@ void drawSettingsBody(Config& cfg, const Counts& n, bool live, const std::vector
     section("ESP OVERLAY");
     {
         Config::Esp& e = cfg.esp;
+        float enemyRgb[]{GetRValue(e.enemyColor) / 255.f, GetGValue(e.enemyColor) / 255.f, GetBValue(e.enemyColor) / 255.f};
+        ImGui::SetNextItemWidth(136.f);
+        if (ImGui::ColorEdit3("Enemy Color", enemyRgb, ImGuiColorEditFlags_DisplayHex | ImGuiColorEditFlags_Uint8)) {
+            e.enemyColor = RGB(int(enemyRgb[0] * 255.f + .5f), int(enemyRgb[1] * 255.f + .5f), int(enemyRgb[2] * 255.f + .5f));
+            ch = true;
+        }
         ch |= switchRow("Skeleton", &e.skeleton);
         ch |= switchRow("Box", &e.box);
         ch |= switchRow("Names", &e.names);
@@ -1636,12 +1668,23 @@ void drawSettingsBody(Config& cfg, const Counts& n, bool live, const std::vector
     drawTriggerSection(ch);
 
     section("LOOT");
-    bool stashLoot = cfg.stashLootMask != 0;
-    if (switchRow("Backpacks, vehicle keys & stashes", &stashLoot)) {
-        cfg.stashLootMask = stashLoot ? loot::kStashLoot : 0;
-        ch = true;
-    }
+    ch |= switchRow("High Valuables", &cfg.highValues);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Ground Zero valuable item list. Also shares cash symbols on Webmap when the current map is published.");
+    static bool stashLootExpanded = false;
+    ch |= switchRow("Backpacks, vehicle keys & stashes", &cfg.stashLootEnabled, nullptr, &stashLootExpanded);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Also shares these markers when Webmap and Publish current map are enabled.");
+    if (stashLootExpanded) {
+        ImGui::Indent();
+        for (const auto cat : {loot::Bag, loot::VehicleKey, loot::Stash}) {
+            bool enabled = loot::shown(cfg.stashLootMask, cat);
+            const char* label = cat == loot::Bag ? "Backpacks" : loot::info(cat).name;
+            if (switchRow(label, &enabled)) {
+                cfg.stashLootMask ^= 1u << cat;
+                ch = true;
+            }
+        }
+        ImGui::Unindent();
+    }
     constexpr unsigned coveredMask = 1u << loot::CoveredVehicle;
     bool vehicleBundle = cfg.vehicles && loot::shown(cfg.lootMask, loot::CoveredVehicle);
     if (switchRow("Vehicles + Covered", &vehicleBundle)) {
@@ -1690,6 +1733,8 @@ void drawSettingsBody(Config& cfg, const Counts& n, bool live, const std::vector
             ImGui::BeginDisabled(!cfg.loot && c != loot::CoveredVehicle);
             const int r = catRow(li.id, c, col32(li.color), li.name, n.cat[c], on, true);
             ImGui::EndDisabled();
+            if (loot::shown(loot::kStashLoot, c) && ImGui::IsItemHovered())
+                ImGui::SetTooltip("Ground-loot overlay filter. Use the controls above for map markers.");
             if (r == 1) cfg.lootMask ^= 1u << c, ch = true;
             else if (r == 2) {
                 const unsigned only = 1u << c;
@@ -1923,6 +1968,7 @@ void drawSettingsBody(Config& cfg, const Counts& n, bool live, const std::vector
             ImGui::PopID();
         }
         ImGui::TextWrapped("Backpacks, vehicle keys & stashes follow the switch in Loot.");
+        ImGui::TextWrapped("High Valuables follow the switch in Loot.");
         ImGui::TextWrapped("Vehicles and Covered Vehicles follow their radar switches. Vehicles + Covered toggles both.");
         cfg.webmapChanged |= changed;
     }

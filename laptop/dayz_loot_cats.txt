@@ -5,7 +5,7 @@
 # The classname is what Ickza prints next to a loot marker. Restart Ickza to reload.
 # dayz_rare.txt still wins over this file.
 #
-# Categories: gun ammo attach melee explosive medical food drink tool clothing bag vehicle base other stash vehiclekey coveredvehicle
+# Categories: gun ammo attach melee explosive medical food drink tool clothing bag vehicle base other stash vehiclekey coveredvehicle highvalue
 #
 # Examples:
 # tool    Hatchet

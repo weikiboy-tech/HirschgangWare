@@ -177,6 +177,7 @@ struct Layer {
     radar::Icon icon;
     const char* label;
     bool stashLoot = false;
+    bool highValues = false;
 };
 
 constexpr Layer kLayers[] = {
@@ -186,6 +187,7 @@ constexpr Layer kLayers[] = {
     {Vehicles, radar::Icon::Vehicle, "vehicles"},
     {Loot, radar::Icon::Loot, "loot"},
     {StashLoot, radar::Icon::Loot, "stashLoot", true},
+    {HighValues, radar::Icon::Loot, "highValues", false, true},
 };
 
 const char* stashLootKind(int category) {
@@ -259,16 +261,18 @@ std::string packet(const Options& opt, const std::shared_ptr<const Snapshot>& sn
             const bool covered = d.icon == radar::Icon::Loot && d.cat == loot::CoveredVehicle;
             const auto icon = covered ? radar::Icon::Vehicle : d.icon;
             if (icon != layer.icon || d.webStashLoot != layer.stashLoot ||
+                (d.cat == loot::HighValue && d.icon == radar::Icon::Loot) != layer.highValues ||
                 !inside(d.x, d.z, snap->frame.mapSize)) continue;
             const char* kind = layer.stashLoot ? stashLootKind(d.cat) : nullptr;
-            if (layer.stashLoot && !kind) continue;
+            if (layer.stashLoot && (!kind || !loot::shown(opt.stashLootMask, d.cat))) continue;
+            if (icon == radar::Icon::Loot && !layer.stashLoot && loot::shown(loot::kStashLoot, d.cat)) continue;
             if (count++) out << ',';
             out << "{\"x\":" << d.x << ",\"z\":" << d.z;
             if (kind) {
                 out << ",\"kind\":" << json(kind);
             } else if (covered) {
                 out << ",\"covered\":true";
-            } else if (icon == radar::Icon::Loot) {
+            } else if (icon == radar::Icon::Loot && !layer.highValues) {
                 out << ",\"category\":" << d.cat;
             }
             if (d.icon == radar::Icon::Survivor) {
@@ -627,6 +631,7 @@ public:
     void configure(Options options, const std::string& directory) {
         options.port = std::clamp(options.port, 1024, 65535);
         options.hz = std::clamp(options.hz, 1, 20);
+        options.stashLootMask &= loot::kStashLoot;
         options.publicHost = lower(options.publicHost);
         if (!publicHostValid(options.publicHost)) options.publicHost.clear();
         auto next = std::make_shared<const Settings>(Settings{std::move(options), fs::path(directory)});
@@ -635,6 +640,7 @@ public:
             if (settings_ && settings_->options.enabled == next->options.enabled &&
                 settings_->options.port == next->options.port && settings_->options.hz == next->options.hz &&
                 settings_->options.release == next->options.release &&
+                settings_->options.stashLootMask == next->options.stashLootMask &&
                 settings_->options.publicHost == next->options.publicHost && settings_->root == next->root) return;
             settings_ = std::move(next);
             snapshot_.reset();

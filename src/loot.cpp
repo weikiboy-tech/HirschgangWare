@@ -1,5 +1,6 @@
 
 #include "loot.h"
+#include "high_value.h"
 
 #include <cctype>
 #include <cstdio>
@@ -30,6 +31,7 @@ const Info kInfo[Count] = {
     {"Hidden stashes", "stash", RGB(110, 220, 172)},
     {"Vehicle keys", "vehiclekey", RGB(255, 210, 100)},
     {"Covered Vehicles", "coveredvehicle", RGB(137, 220, 190)},
+    {"High Valuables", "highvalue", RGB(218, 203, 140)},
 };
 
 std::string lower(std::string s) {
@@ -135,7 +137,8 @@ bool valuable(int cat) {
         case Attachment:
         case Explosive:
         case Bag:
-        case Rare: return true;
+        case Rare:
+        case HighValue: return true;
         default: return false;
     }
 }
@@ -144,6 +147,7 @@ int classify(int engineCat, const std::string& name) {
     const std::string n = lower(name);
     for (const auto& [cat, pat] : gOverride)
         if (matches(n, pat.c_str())) return cat;
+    if (high_value::matches(n)) return HighValue;
     if (coveredVehicle(n)) return CoveredVehicle;
     if (engineCat == Gun) return Gun;
     if (engineCat == Ammo || n.rfind("ammo_", 0) == 0 || n.rfind("mag_", 0) == 0) return Ammo;

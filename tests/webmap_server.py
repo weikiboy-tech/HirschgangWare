@@ -251,6 +251,8 @@ try:
         {"x": 700, "z": 1020, "kind": "loot-cluster", "label": "Loot-H\u00e4ufung"},
     ]
     assert snap["layers"]["players"][0]["held"] == "GZ_TestRifle"
+    assert snap["layers"]["highValues"] == [{"x": 520, "z": 940}, {"x": 630, "z": 940}]
+    assert all(dot["z"] != 940 for dot in snap["layers"]["loot"])
     assert snap["layers"]["vehicles"] == [{"x": 490, "z": 1080}, {"x": 710, "z": 1080, "covered": True}]
     assert all(dot["z"] != 1080 for dot in snap["layers"]["loot"])
     assert snap["heldShared"] is True
@@ -278,6 +280,11 @@ try:
     assert b"TestCar" not in packet and b"Motorbike_Red_Cover" not in packet
     snap, _ = released("on", lambda p: set(p["layers"]) == {"loot"})
     assert all(dot["z"] != 1080 for dot in snap["layers"]["loot"])
+    snap, packet = released("high-values-only", lambda p: set(p["layers"]) == {"highValues"})
+    assert snap["layers"]["highValues"] == [{"x": 520, "z": 940}, {"x": 630, "z": 940}]
+    assert b"GZ_Bitcoin" not in packet and b"GZEFT_LEDX" not in packet
+    snap, packet = released("on", lambda p: set(p["layers"]) == {"loot"})
+    assert all(dot["z"] != 940 for dot in snap["layers"]["loot"])
 
     snap, packet = released("stash-only", lambda p: set(p["layers"]) == {"stashLoot"})
     assert snap["layers"]["stashLoot"] == [
@@ -287,6 +294,10 @@ try:
     ]
     assert all(label not in packet for label in
                (b"Hammer", b"private-item", b"HuntingBag_Autumn", b"ExpansionCarKey_Red", b"UndergroundStash"))
+    snap, _ = released("stash-keys", lambda p: "stashLoot" in p["layers"] and "loot" in p["layers"])
+    assert snap["layers"]["stashLoot"] == [{"x": 560, "z": 960, "kind": "vehicle-key"}]
+    assert all(dot["x"] != 780 for dot in snap["layers"]["loot"])
+    released("stash-only", lambda p: len(p["layers"].get("stashLoot", [])) == 3)
     released("take-backpack", lambda p: len(p["layers"].get("stashLoot", [])) == 2)
     snap, _ = released("mapchange", lambda p: p["map"] == "different")
     assert snap["layers"]["stashLoot"] == []
