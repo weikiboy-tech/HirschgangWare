@@ -17,6 +17,7 @@
 #include <csignal>
 #include <cstring>
 #include <exception>
+#include <fstream>
 #include <map>
 #include <share.h>
 #include <memory>
@@ -114,6 +115,7 @@ struct Box {
     Skeleton skel;
     int kind = 0;
     uint64_t id = 0;
+    int health = player_health::unknown;
 };
 
 std::unique_ptr<Process> gProc;
@@ -181,6 +183,7 @@ struct DzLootItem {
     Vec3 pos;
     std::string name;
     int cat = LC_Other;
+    bool mapOnly = false;
 };
 struct DzSnap {
     std::string mapId;
@@ -191,6 +194,8 @@ struct DzSnap {
     Vec3 me{};
     std::string meName;
     std::string meHeld;
+    int meHealth = player_health::unknown;
+    player_health::Status healthStatus = player_health::Status::Off;
     struct E {
         int kind;
         uint64_t ptr = 0;
@@ -201,6 +206,7 @@ struct DzSnap {
         uint64_t posUs = 0;
         std::string name;
         std::string held;
+        int health = player_health::unknown;
         bool hasBones = false;
         Vec3 joints[DJ_Count];
     };
@@ -208,6 +214,8 @@ struct DzSnap {
     std::shared_ptr<const std::vector<DzLootItem>> loot;
     std::shared_ptr<const std::vector<radar_event::Marker>> events;
     uint64_t eventRevision = 0;
+    std::shared_ptr<const radar_corpse::Markers> corpses;
+    uint64_t corpseMapRevision = 0;
     std::shared_ptr<const std::vector<std::string>> online;
     size_t slots = 0, targets = 0, lootSlots = 0;
     int dead = 0;
@@ -227,8 +235,13 @@ std::shared_ptr<const std::vector<radar_event::Marker>> gDzLootEvents, gDzVisibl
 uint64_t gDzLootWorld = 0, gDzLootEventRevision = 0, gDzLootEventAt = 0;
 std::vector<uint64_t> gDzEventSlots;
 uint64_t gDzEventSlotsWorld = 0, gDzEventSlotsAt = 0;
-std::atomic<uint64_t> gDzEventRevision{1};
-std::atomic<bool> gDzReadEvents{false}, gDzReadWebHeld{false};
+std::atomic<uint64_t> gDzEventRevision{1}, gDzCorpseMapRevision{1};
+radar_corpse::Tracker gDzCorpseTracker;
+std::shared_ptr<const radar_corpse::Markers> gDzVisibleCorpses;
+std::atomic<bool> gDzReadEvents{false}, gDzReadWebHeld{false}, gDzReadHealth{false};
+std::atomic<bool> gDzReadStashLoot{false};
+std::atomic<bool> gDzReadCoveredVehicles{false};
+std::atomic<unsigned> gDzLootInterval{0};
 // 0 = off; positive values cap independent trigger bone reads in meters.
 std::atomic<int> gDzTriggerBoneRange{0};
 size_t gDzLootSlotsPub = 0;
@@ -256,6 +269,7 @@ struct RadarPt {
     const std::string* name;
     float fwdX = 0, fwdZ = 0;
     const std::string* held = nullptr;
+    int health = player_health::unknown;
 };
 DzSnap gDzRadarSnap;
 struct DzRadar {
@@ -621,7 +635,10 @@ bool dzIsRare(const std::string& name) {
     return false;
 }
 
-int dzLootCategory(int vtCat, const std::string& name) { return dzIsRare(name) ? LC_Rare : loot::classify(vtCat, name); }
+int dzLootCategory(int vtCat, const std::string& name) {
+    const auto category = loot::classify(vtCat, name);
+    return category != loot::CoveredVehicle && !loot::shown(loot::kStashLoot, category) && dzIsRare(name) ? LC_Rare : category;
+}
 
 std::string dzPretty(int kind, const std::string& raw) {
     static const std::pair<const char*, const char*> kAnimals[] = {
@@ -845,7 +862,10 @@ void dzDetectMap(uint64_t world) {
     }
 #endif
     std::lock_guard<std::mutex> lk(gDzMapMx);
-    if (gDzMapSeenWorld == world && gDzMapSeen != id) ++gDzEventRevision;
+    if (gDzMapSeenWorld == world && gDzMapSeen != id) {
+        ++gDzEventRevision;
+        ++gDzCorpseMapRevision;
+    }
     gDzMapSeen = id;
     gDzMapSeenWorld = world;
     if (id != last) {
@@ -986,7 +1006,11 @@ void scanDayz(DzSnap& out, const char*& stage) {
         std::vector<Process::ReadReq> wreq = {{base + dz::kWorld, &world, 8}};
         gProc->readMany(wreq);
         stage = "World pointer unreadable or null (in game?)";
-        if (!wreq[0].ok || !dz::heapPtr(world)) { gDzWorld = 0; return; }
+        if (!wreq[0].ok || !dz::heapPtr(world)) {
+            if (wreq[0].ok) gDzCorpseTracker.clear();
+            gDzWorld = 0;
+            return;
+        }
         static uint64_t namesWorld = 0;
         if (world != namesWorld) {
             namesWorld = world;
@@ -1043,7 +1067,8 @@ void scanDayz(DzSnap& out, const char*& stage) {
         if (dz::heapPtr(s) && s != local) ents.push_back(s);
     if (local) ents.push_back(local);
     out.slots = ents.size();
-    if (gDzReadEvents.load(std::memory_order_relaxed)) {
+    if (gDzReadEvents.load(std::memory_order_relaxed) || gDzReadStashLoot.load(std::memory_order_relaxed) ||
+        gDzReadCoveredVehicles.load(std::memory_order_relaxed)) {
         std::lock_guard<std::mutex> lock(gDzLootMx);
         if (gDzEventSlotsWorld != world || now - gDzEventSlotsAt >= 300) {
             gDzEventSlots = ents;
@@ -1261,6 +1286,9 @@ void scanDayz(DzSnap& out, const char*& stage) {
     std::vector<size_t> needNameIdx;
     std::vector<uint64_t> needNamePtr;
 
+    const uint64_t deathTick = GetTickCount64();
+    out.corpseMapRevision = gDzCorpseMapRevision.load(std::memory_order_relaxed);
+    gDzCorpseTracker.begin(world, out.corpseMapRevision, deathTick);
     int dead = 0;
     for (size_t i = 0; i < targets.size(); ++i) {
         const uint64_t ptr = targets[i].ptr;
@@ -1271,7 +1299,15 @@ void scanDayz(DzSnap& out, const char*& stage) {
             gDzEntDead[ptr] = isDead;
             uint64_t vs = 0;
             std::memcpy(&vs, &flags[i][dz::kVisualState - dz::kFlags], 8);
-            if (dz::heapPtr(vs) && !isDead) gDzEntVs[ptr] = vs;
+            bool needDeathPosition = false;
+            if (isLocal || targets[i].kind == 1) {
+                std::optional<radar_event::Point> deathPosition;
+                const auto previousVs = gDzEntVs.find(ptr);
+                if (isDead && tfOk[i] && previousVs != gDzEntVs.end() && previousVs->second == vs)
+                    deathPosition = radar_event::Point{tfs[i][9], tfs[i][11]};
+                needDeathPosition = gDzCorpseTracker.observe(ptr, isDead, deathPosition, deathTick);
+            }
+            if (dz::heapPtr(vs) && (!isDead || needDeathPosition)) gDzEntVs[ptr] = vs;
         } else {
             const auto dit = gDzEntDead.find(ptr);
             if (dit == gDzEntDead.end()) continue;
@@ -1313,6 +1349,7 @@ void scanDayz(DzSnap& out, const char*& stage) {
         }
     }
     out.dead = dead;
+    out.corpses = gDzCorpseTracker.snapshot();
 
     for (BoneRead& br : boneReads) {
         const uint64_t ptr = targets[br.ti].ptr;
@@ -1550,6 +1587,54 @@ void scanDayz(DzSnap& out, const char*& stage) {
         gDzServer = best;
     }
 
+    if (gDzReadHealth.load(std::memory_order_relaxed)) {
+        static uint64_t readAt = 0;
+        static player_health::Snapshot feed;
+        const bool poll = !readAt || now - readAt >= 500;
+        if (poll) {
+            readAt = now;
+            std::ifstream file(exeDir() + "\\player-health.tsv", std::ios::binary);
+            if (file) {
+                std::string bytes(player_health::maxFeedBytes, '\0');
+                file.read(bytes.data(), std::streamsize(bytes.size()));
+                bytes.resize(size_t(file.gcount()));
+                feed = player_health::parse(bytes);
+            } else {
+                feed = {};
+            }
+        }
+        out.healthStatus = feed.at ? player_health::Status::StaleOrWrongSession : player_health::Status::Missing;
+        const auto wallTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        std::string server;
+        if (feed.at) {
+            std::lock_guard<std::mutex> lk(gDzServerMx);
+            server = gDzServer;
+        }
+        if (feed.current(uint64_t(wallTime), out.mapId, server)) {
+            out.healthStatus = player_health::Status::NoMatch;
+            for (auto& e : out.ents) {
+                const auto peer = gDzEntNetId.find(e.ptr);
+                if (e.kind == 1 && peer != gDzEntNetId.end())
+                    e.health = feed.find(peer->second, e.feet.x, e.feet.z);
+            }
+            static uint32_t ownPeer = 0;
+            static uint64_t peerWorld = 0, peerEntity = 0, peerReadAt = 0;
+            if (local && out.haveMe) {
+                if (world != peerWorld || local != peerEntity || now - peerReadAt >= 500) {
+                    peerWorld = world;
+                    peerEntity = local;
+                    peerReadAt = now;
+                    if (!gProc->read(uintptr_t(local + dz::kEntNetId), ownPeer)) ownPeer = 0;
+                }
+                out.meHealth = feed.find(ownPeer, out.me.x, out.me.z);
+            }
+            if (player_health::valid(out.meHealth) || std::any_of(out.ents.begin(), out.ents.end(),
+                [](const DzSnap::E& player) { return player_health::valid(player.health); }))
+                out.healthStatus = player_health::Status::Ready;
+        }
+    }
+
     if (gSettings.dzHeld || gDzReadWebHeld.load(std::memory_order_relaxed)) {
         if (now - gDzHeldTick >= dz::kHeldMs) {
             gDzHeldTick = now;
@@ -1644,18 +1729,14 @@ void scanDayz(DzSnap& out, const char*& stage) {
     out.online = gDzOnline;
 
     gDzWorldPub.store(world, std::memory_order_relaxed);
-    if (gSettings.dzLoot || gDzReadEvents.load(std::memory_order_relaxed)) {
+    if (gDzLootInterval.load(std::memory_order_relaxed)) {
         if (!gDzLootThread.joinable()) dzLootPass(world);
         std::lock_guard<std::mutex> lk(gDzLootMx);
-        if (gDzLootWorld == world) {
-            if (gSettings.dzLoot) {
-                out.loot = gDzLootList;
-                out.lootSlots = gDzLootSlotsPub;
-            }
-            if (now - std::min<uint64_t>(now, gDzLootEventAt) <= 3000) {
-                out.events = gDzLootEvents;
-                out.eventRevision = gDzLootEventRevision;
-            }
+        if (gDzLootWorld == world && now - std::min<uint64_t>(now, gDzLootEventAt) <= 3000) {
+            out.loot = gDzLootList;
+            out.lootSlots = gDzLootSlotsPub;
+            out.events = gDzLootEvents;
+            out.eventRevision = gDzLootEventRevision;
         }
     }
     stage = "ok";
@@ -1673,22 +1754,38 @@ uint32_t dzLootLayout(const uint8_t* raw, size_t bytes) {
         if ((f == 0 || f == 1) && (p == 0 || dz::heapPtr(p))) ++sane;
         if (f == 1 && dz::heapPtr(p)) ++live;
     }
-    return n >= 4 && live > 0 && sane * 10 >= n * 9 ? kLootStride : 8;
+    if (n >= 4 && live > 0 && sane * 10 >= n * 9) return kLootStride;
+    size_t pointers = 0;
+    const size_t flat = bytes / 8;
+    for (size_t i = 0; i < flat; ++i) {
+        uint64_t p = 0;
+        std::memcpy(&p, raw + i * 8, 8);
+        pointers += dz::heapPtr(p);
+    }
+    return pointers * 2 > flat ? 8 : 0;
 }
 
 void dzLootPass(uint64_t world) {
     const ULONGLONG now = GetTickCount64();
     const auto eventRevision = gDzEventRevision.load(std::memory_order_relaxed);
     const bool readEvents = gDzReadEvents.load(std::memory_order_relaxed);
+    const bool readStashLoot = gDzReadStashLoot.load(std::memory_order_relaxed);
+    const bool readCoveredVehicles = gDzReadCoveredVehicles.load(std::memory_order_relaxed);
     std::unordered_set<uint64_t> freshEventPositions;
     std::shared_ptr<const std::vector<radar_event::Marker>> events;
     thread_local radar_event::Tracker eventTracker;
     thread_local uint64_t lootWorld = 0;
-    thread_local std::unordered_map<uint64_t, std::optional<radar_event::Kind>> eventTypes;
+    struct NearbyType {
+        std::string name;
+        std::optional<radar_event::Kind> event;
+        int category;
+        uint64_t retryAt;
+    };
+    thread_local std::unordered_map<uint64_t, NearbyType> nearbyTypes;
     const bool worldChanged = world != lootWorld;
     if (worldChanged) {
         lootWorld = world;
-        eventTypes.clear();
+        nearbyTypes.clear();
         gDzLootVs.clear();
         gDzLootPos.clear();
         gDzLootName.clear();
@@ -1719,43 +1816,57 @@ void dzLootPass(uint64_t world) {
         std::vector<uint64_t> lslots;
         if (lreq[0].ok && dz::heapPtr(lbuf) && alloc && alloc <= dz::kMaxLoot) {
             if (stride == 0) {
-                std::vector<uint8_t> probe(alloc * 8, 0);
-                lreq = {{uintptr_t(lbuf), probe.data(), probe.size()}};
+                constexpr size_t probeSize = 32 * kLootStride;
+                const size_t bytes = size_t(alloc) * 8;
+                const size_t span = std::min(probeSize, bytes);
+                const size_t tail = (bytes - span) / kLootStride * kLootStride;
+                const size_t offsets[] = {0, tail / 2 / kLootStride * kLootStride, tail};
+                std::array<std::array<uint8_t, probeSize>, 3> probe{};
+                lreq.clear();
+                for (size_t i = 0; i < probe.size(); ++i)
+                    lreq.push_back({uintptr_t(lbuf + offsets[i]), probe[i].data(), span});
                 gProc->readMany(lreq);
-                if (lreq[0].ok) {
-                    stride = dzLootLayout(probe.data(), probe.size());
+                for (size_t i = 0; i < probe.size(); ++i) {
+                    if (!lreq[i].ok) continue;
+                    const auto layout = dzLootLayout(probe[i].data(), span);
+                    if (layout == kLootStride) { stride = layout; break; }
+                    if (layout == 8) stride = layout;
+                }
 #ifndef HIRSCHGANGWARE_NO_DIAG
+                if (stride) {
                     static uint32_t logged = 0;
                     if (stride != logged)
                         logLine("[loot] item table: %s entries, alloc %llu, valid %llu",
                                 stride == kLootStride ? "flagged 0x18" : "flat 8-byte", (unsigned long long)alloc,
                                 (unsigned long long)lvalid);
                     logged = stride;
+                }
 #endif
-                }
             }
-            if (stride == kLootStride) {
-                std::vector<uint8_t> raw(alloc * kLootStride, 0);
-                lreq = {{uintptr_t(lbuf), raw.data(), raw.size()}};
-                gProc->readMany(lreq);
-                slotsOk = lreq[0].ok;
-                if (slotsOk) {
-                    lslots.reserve(lvalid && lvalid <= alloc ? lvalid : alloc);
-                    for (size_t i = 0; i < alloc; ++i) {
-                        uint16_t f;
-                        uint64_t p;
-                        std::memcpy(&f, &raw[i * kLootStride], 2);
-                        std::memcpy(&p, &raw[i * kLootStride + kLootEntPtr], 8);
-                        if (f == 1 && dz::heapPtr(p)) lslots.push_back(p);
-                    }
-                }
-            } else if (stride == 8) {
+            if (stride) {
+                constexpr size_t rowsPerRead = 64;
                 const uint64_t count = hdr[1] >> 32;
-                const uint64_t n = count && count <= alloc ? count : alloc;
-                lslots.assign(n, 0);
-                lreq = {{uintptr_t(lbuf), lslots.data(), n * 8}};
+                const size_t rows = stride == 8 && count && count <= alloc ? size_t(count) : size_t(alloc);
+                std::vector<uint8_t> raw(rows * stride, 0);
+                lreq.clear();
+                for (size_t row = 0; row < rows; row += rowsPerRead)
+                    lreq.push_back({uintptr_t(lbuf + row * stride), raw.data() + row * stride,
+                                    std::min(rowsPerRead, rows - row) * stride});
                 gProc->readMany(lreq);
-                slotsOk = lreq[0].ok;
+                slotsOk = std::all_of(lreq.begin(), lreq.end(), [](const auto& part) { return part.ok; });
+                lslots.reserve(lvalid && lvalid <= rows ? lvalid : rows);
+                for (size_t i = 0; i < rows; ++i) {
+                    if (!lreq[i / rowsPerRead].ok) continue;
+                    const auto row = raw.data() + i * stride;
+                    uint64_t ptr = 0;
+                    if (stride == kLootStride) {
+                        uint16_t f;
+                        std::memcpy(&f, row, sizeof f);
+                        if (f != 1) continue;
+                        std::memcpy(&ptr, row + kLootEntPtr, sizeof ptr);
+                    } else std::memcpy(&ptr, row, sizeof ptr);
+                    if (dz::heapPtr(ptr)) lslots.push_back(ptr);
+                }
             }
         }
 #ifndef HIRSCHGANGWARE_NO_DIAG
@@ -1771,10 +1882,10 @@ void dzLootPass(uint64_t world) {
             prevSlots.swap(cur);
         }
 #endif
-        if (slotsOk && !lslots.empty()) {
+        if (!lslots.empty()) {
             const uint64_t ln = lslots.size();
             lootSlots = ln;
-            if (lootSweep) {
+            if (lootSweep && slotsOk) {
                 const std::unordered_set<uint64_t> live(lslots.begin(), lslots.end());
                 const auto prune = [&live](auto& m) {
                     for (auto it = m.begin(); it != m.end();) it = live.count(it->first) ? std::next(it) : m.erase(it);
@@ -1815,13 +1926,24 @@ void dzLootPass(uint64_t world) {
                 }
             }
             std::vector<uint64_t> needPos;
-            size_t eventPositions = 0;
+            size_t eventPositions = 0, stashPositions = 0;
             for (uint64_t s : lslots) {
                 const auto v = gDzLootVs.find(s);
                 if (v == gDzLootVs.end()) continue;
                 if (gDzLootPos.find(s) == gDzLootPos.end()) {
                     needPos.push_back(s);
-                } else if (readEvents && eventPositions < radar_event::kMaxMarkers) {
+                    continue;
+                }
+                if ((readStashLoot || readCoveredVehicles) && stashPositions < webmap::kStashLootLimit) {
+                    const auto cat = gDzLootCat.find(s);
+                    if (cat != gDzLootCat.end() && ((readStashLoot && loot::shown(loot::kStashLoot, cat->second)) ||
+                        (readCoveredVehicles && cat->second == loot::CoveredVehicle))) {
+                        needPos.push_back(s);
+                        ++stashPositions;
+                        continue;
+                    }
+                }
+                if (readEvents && eventPositions < radar_event::kMaxMarkers) {
                     const auto name = gDzLootName.find(s);
                     if (name != gDzLootName.end() && radar_event::knownType(name->second)) {
                         needPos.push_back(s);
@@ -1835,7 +1957,7 @@ void dzLootPass(uint64_t world) {
                 for (size_t i = 0; i < needPos.size(); ++i) lreq.push_back({uintptr_t(gDzLootVs[needPos[i]] + dz::kVsPos), &pv[i], 12});
                 gProc->readMany(lreq);
                 for (size_t i = 0; i < needPos.size(); ++i) {
-                    if (!lreq[i].ok || !std::isfinite(pv[i].x)) continue;
+                    if (!lreq[i].ok || !std::isfinite(pv[i].x) || !std::isfinite(pv[i].z)) continue;
                     gDzLootPos[needPos[i]] = pv[i];
                     if (readEvents) freshEventPositions.insert(needPos[i]);
                 }
@@ -1856,7 +1978,7 @@ void dzLootPass(uint64_t world) {
                 for (size_t i = 0; i < needName.size(); ++i)
                     lreq.push_back({uintptr_t(dz::heapPtr(cfg[i]) ? cfg[i] + dz::kCfgName : 0), &str[i], 8});
                 gProc->readMany(lreq);
-                constexpr size_t kNameBytes = 48;
+                constexpr size_t kNameBytes = 96;
                 std::vector<uint8_t> nb(needName.size() * kNameBytes, 0);
                 lreq.clear();
                 for (size_t i = 0; i < needName.size(); ++i)
@@ -1898,9 +2020,9 @@ void dzLootPass(uint64_t world) {
                 list.push_back(std::move(li));
             }
         }
-        if (readEvents) {
+        if (readEvents || readStashLoot || readCoveredVehicles) {
             std::optional<radar_event::Point> observer;
-            {
+            if (readEvents) {
                 std::lock_guard<std::mutex> lock(gDzSnapMx);
                 if (gDzSnap.world == world && gDzSnap.haveMe && gDzSnap.tUs &&
                     qpcUs() - gDzSnap.tUs <= 1500000) {
@@ -1909,7 +2031,7 @@ void dzLootPass(uint64_t world) {
                 }
             }
             std::vector<radar_event::Object> observations;
-            if (slotsOk) {
+            if (readEvents && slotsOk) {
                 observations.reserve(lslots.size());
                 for (const auto ptr : lslots) {
                     if (!dz::heapPtr(ptr)) continue;
@@ -1930,41 +2052,59 @@ void dzLootPass(uint64_t world) {
                     nearby = gDzEventSlots;
             }
             const std::unordered_set<uint64_t> live(nearby.begin(), nearby.end());
-            for (auto it = eventTypes.begin(); it != eventTypes.end();)
-                it = live.count(it->first) ? std::next(it) : eventTypes.erase(it);
+            for (auto it = nearbyTypes.begin(); it != nearbyTypes.end();)
+                it = live.count(it->first) ? std::next(it) : nearbyTypes.erase(it);
             std::vector<uint64_t> unknown;
             for (uint64_t ptr : nearby) {
-                if (!eventTypes.count(ptr) && std::find(unknown.begin(), unknown.end(), ptr) == unknown.end())
+                const auto type = nearbyTypes.find(ptr);
+                const bool due = type == nearbyTypes.end() || (type->second.retryAt && now >= type->second.retryAt);
+                if (due && std::find(unknown.begin(), unknown.end(), ptr) == unknown.end())
                     unknown.push_back(ptr);
                 if (unknown.size() == 24) break;
             }
             if (!unknown.empty()) {
                 const auto names = dzTypeNames(unknown);
-                for (size_t i = 0; i < names.size(); ++i)
-                    eventTypes[unknown[i]] = radar_event::knownType(names[i]);
+                for (size_t i = 0; i < names.size(); ++i) {
+                    const auto& name = names[i];
+                    nearbyTypes.insert_or_assign(unknown[i], NearbyType{
+                        name, radar_event::knownType(name), loot::classify(LC_Other, name), name.empty() ? now + 3000 : 0});
+                }
             }
-            std::vector<uint64_t> confirmed;
+            struct NearbyRead { uint64_t ptr; bool mapLoot; };
+            std::vector<NearbyRead> confirmed;
             for (uint64_t ptr : nearby) {
-                const auto type = eventTypes.find(ptr);
-                if (type != eventTypes.end() && type->second) confirmed.push_back(ptr);
+                const auto type = nearbyTypes.find(ptr);
+                if (type == nearbyTypes.end()) continue;
+                const bool event = readEvents && type->second.event.has_value();
+                const bool mapType = (readStashLoot && type->second.category == loot::Stash) ||
+                                     (readCoveredVehicles && type->second.category == loot::CoveredVehicle);
+                const bool mapLoot = mapType &&
+                    (!gDzLootPos.count(ptr) || std::find(lslots.begin(), lslots.end(), ptr) == lslots.end());
+                if ((event || mapLoot) && std::none_of(confirmed.begin(), confirmed.end(),
+                        [ptr](const NearbyRead& entry) { return entry.ptr == ptr; })) confirmed.push_back({ptr, mapLoot});
                 if (confirmed.size() == radar_event::kMaxMarkers) break;
             }
             if (!confirmed.empty()) {
                 std::vector<uint64_t> visual(confirmed.size());
                 lreq.clear();
                 for (size_t i = 0; i < confirmed.size(); ++i)
-                    lreq.push_back({uintptr_t(confirmed[i] + dz::kVisualState), &visual[i], 8});
+                    lreq.push_back({uintptr_t(confirmed[i].ptr + dz::kVisualState), &visual[i], 8});
                 gProc->readMany(lreq);
                 std::vector<Vec3> positions(confirmed.size());
                 lreq.clear();
                 for (size_t i = 0; i < confirmed.size(); ++i)
                     lreq.push_back({uintptr_t(dz::heapPtr(visual[i]) ? visual[i] + dz::kVsPos : 0), &positions[i], 12});
                 gProc->readMany(lreq);
-                for (size_t i = 0; i < confirmed.size(); ++i) if (lreq[i].ok)
-                    observations.push_back({confirmed[i], radar_event::Point{positions[i].x, positions[i].z},
-                                            eventTypes.at(confirmed[i])});
+                for (size_t i = 0; i < confirmed.size(); ++i) {
+                    const radar_event::Point point{positions[i].x, positions[i].z};
+                    if (!lreq[i].ok || !radar_event::valid(point)) continue;
+                    const auto [ptr, mapLoot] = confirmed[i];
+                    const auto& type = nearbyTypes.at(ptr);
+                    if (readEvents && type.event) observations.push_back({ptr, point, type.event});
+                    if (mapLoot) list.push_back({positions[i], type.name, type.category, true});
+                }
             }
-            events = std::make_shared<const std::vector<radar_event::Marker>>(
+            if (readEvents) events = std::make_shared<const std::vector<radar_event::Marker>>(
                 eventTracker.update(world, eventRevision, now, observations, observer, slotsOk));
         }
     }
@@ -2199,6 +2339,7 @@ void projectDz(const DzSnap& snap, const dz::Cam& view, const Vec3& me) {
         e.name = !ent.name.empty() ? ent.name : kDefault[std::clamp(ent.kind, 0, 4)];
         Box b{gView.left + tx - bw / 2, gView.top + ty, bw, bh, e, dist, ent.held, !friends::contains(e.name), Skeleton{}};
         b.kind = ent.kind;
+        b.health = ent.health;
         b.id = ent.ptr;
         if (ent.hasBones) {
             for (int j = 0; j < DJ_Count; ++j) {
@@ -2243,6 +2384,7 @@ void projectDz(const DzSnap& snap, const dz::Cam& view, const Vec3& me) {
         if (gSettings.dzLootRange > 0 && float(gSettings.dzLootRange) < lootRange) lootRange = float(gSettings.dzLootRange);
         const bool whitelist = loot::filter().mode == loot::FilterWhite;
         for (const DzLootItem& it : *snap.loot) {
+            if (it.mapOnly) continue;
             const Vec3& p = it.pos;
             if (!std::isfinite(p.x) || std::fabs(p.x) > 50000 || std::fabs(p.z) > 50000) continue;
             const float dx = p.x - me.x, dy = p.y - me.y, dzz = p.z - me.z;
@@ -2266,9 +2408,12 @@ void updateDzRadar(const DzSnap& snap, const Vec3& me, const Vec3& fwd) {
             gDzRadarSnap = snap;
         gDzRadar.me = me;
         gDzRadar.fwd = fwd;
-        for (const DzSnap::E& ent : gDzRadarSnap.ents) gDzRadar.pts.push_back({ent.feet.x, ent.feet.z, ent.kind, &ent.name, ent.fwdX, ent.fwdZ, &ent.held});
-        if (gSettings.dzLoot && gDzRadarSnap.loot)
-            for (const DzLootItem& it : *gDzRadarSnap.loot) gDzRadar.pts.push_back({it.pos.x, it.pos.z, 10 + it.cat, &it.name});
+        for (const DzSnap::E& ent : gDzRadarSnap.ents) gDzRadar.pts.push_back({ent.feet.x, ent.feet.z, ent.kind, &ent.name, ent.fwdX, ent.fwdZ, &ent.held, ent.health});
+        if (gDzRadarSnap.loot)
+            for (const DzLootItem& it : *gDzRadarSnap.loot)
+                if (it.cat == loot::CoveredVehicle ? loot::shown(gSettings.dzLootCats, it.cat) :
+                    (gSettings.dzLoot && !it.mapOnly) || loot::shown(gSettings.dzRadarStashLoot, it.cat))
+                    gDzRadar.pts.push_back({it.pos.x, it.pos.z, 10 + it.cat, &it.name});
     }
 }
 
@@ -2440,21 +2585,35 @@ void dzLootLoop() {
     while (gDzReadRun.load(std::memory_order_relaxed)) {
         const ULONGLONG t0 = GetTickCount64();
         const uint64_t world = gDzWorldPub.load(std::memory_order_relaxed);
-        if ((gSettings.dzLoot || gDzReadEvents.load(std::memory_order_relaxed)) && world) dzLootPass(world);
-        const ULONGLONG interval = gSettings.dzLoot ? kLootPassMs : 300;
+        const unsigned requested = gDzLootInterval.load(std::memory_order_relaxed);
+        if (requested && world) dzLootPass(world);
+        const ULONGLONG interval = requested ? requested : 300;
         const ULONGLONG spent = GetTickCount64() - t0;
         std::this_thread::sleep_for(std::chrono::milliseconds(spent < interval ? interval - spent : 1));
     }
 }
 
 void updateWebmapReaders() {
-    const auto& web = gSettings.webmap;
+    auto& web = gSettings.webmap;
+    const bool stashLoot = gSettings.dzRadarStashLoot != 0;
+    const bool coveredVehicles = loot::shown(gSettings.dzLootCats, loot::CoveredVehicle);
+    if (stashLoot) web.release |= webmap::StashLoot;
+    else web.release &= ~unsigned(webmap::StashLoot);
+    if (gSettings.dzVehicles || coveredVehicles) web.release |= webmap::Vehicles;
+    else web.release &= ~unsigned(webmap::Vehicles);
     const bool published = web.enabled && web.shares(webmap::CurrentMap);
+    gDzReadHealth.store(gSettings.dzEspHealth || gSettings.dzRadarHealth || (published && web.shares(webmap::PlayerHealth)),
+                        std::memory_order_relaxed);
     const bool events = gSettings.dzRadarEvents || (published && web.shares(webmap::Events));
     if (gDzReadEvents.exchange(events, std::memory_order_relaxed) != events)
         ++gDzEventRevision;
+    gDzReadStashLoot.store(stashLoot, std::memory_order_relaxed);
+    gDzReadCoveredVehicles.store(coveredVehicles, std::memory_order_relaxed);
+    gDzLootInterval.store(gSettings.dzLoot ? kLootPassMs : events || stashLoot || coveredVehicles ? 300 : 0,
+                          std::memory_order_relaxed);
     gDzReadWebHeld.store(published && web.shares(webmap::PlayerHeld) &&
         (web.shares(webmap::Players) || web.shares(webmap::Own)), std::memory_order_relaxed);
+    webmap::configure(web, exeDir());
 }
 
 void startDzThread() {
@@ -2496,12 +2655,14 @@ void publishWebmap(const DzSnap& snap, const Vec3* heading) {
     radar::Frame frame;
     frame.mapSize = dzMapSize(id);
     if (options.shares(webmap::Events)) frame.events = gDzVisibleEvents;
+    if (options.shares(webmap::Corpses)) frame.corpses = gDzVisibleCorpses;
     frame.ok = options.shares(webmap::Own) && snap.haveMe;
     if (frame.ok) {
         frame.meX = snap.me.x;
         frame.meZ = snap.me.z;
         if (options.shares(webmap::PlayerNames)) frame.meName = snap.meName;
         if (options.shares(webmap::PlayerHeld)) frame.meHeld = snap.meHeld;
+        if (options.shares(webmap::PlayerHealth)) frame.meHealth = snap.meHealth;
         if (options.shares(webmap::Heading) && heading) {
             frame.fwdX = heading->x;
             frame.fwdZ = heading->z;
@@ -2517,10 +2678,11 @@ void publishWebmap(const DzSnap& snap, const Vec3* heading) {
             d.webFriend = !player->name.empty() && friends::contains(player->name);
             if (options.shares(webmap::PlayerNames)) d.name = player->name;
             if (options.shares(webmap::PlayerHeld)) d.held = player->held;
+            if (options.shares(webmap::PlayerHealth)) d.health = player->health;
         }
         frame.dots.push_back(std::move(d));
     };
-    unsigned counts[5]{};
+    unsigned counts[4]{};
     const bool radarLayer[]{true, gSettings.dzInfected, gSettings.dzAnimals, gSettings.dzVehicles};
     constexpr webmap::Release release[]{webmap::Players, webmap::Infected, webmap::Animals, webmap::Vehicles};
     constexpr radar::Icon icon[]{radar::Icon::Survivor, radar::Icon::Infected, radar::Icon::Animal, radar::Icon::Vehicle};
@@ -2534,12 +2696,29 @@ void publishWebmap(const DzSnap& snap, const Vec3* heading) {
             ++counts[kind];
         }
     }
-    if (options.shares(webmap::Loot) && gSettings.dzLoot && snap.loot) {
+    const bool shareLoot = options.shares(webmap::Loot) && gSettings.dzLoot;
+    const bool mapMatches = snap.mapId.empty() || snap.mapId == id;
+    const bool shareStashLoot = options.shares(webmap::StashLoot) && mapMatches;
+    const bool shareCoveredVehicles = options.shares(webmap::Vehicles) && mapMatches &&
+                                      loot::shown(gSettings.dzLootCats, loot::CoveredVehicle);
+    if ((shareLoot || shareStashLoot || shareCoveredVehicles) && snap.loot) {
+        unsigned ordinary = 0, special = 0;
         for (const auto& d : *snap.loot) {
-            if (counts[4] == 512) break;
-            if (!loot::visible(gSettings.dzLootCats, d.cat, d.name)) continue;
-            add(d.pos.x, d.pos.z, radar::Icon::Loot, d.cat);
-            ++counts[4];
+            if (!radar_event::valid({d.pos.x, d.pos.z}) || d.pos.x > frame.mapSize || d.pos.z > frame.mapSize) continue;
+            if (d.cat == loot::CoveredVehicle) {
+                if (shareCoveredVehicles && counts[3] < 512) {
+                    add(d.pos.x, d.pos.z, radar::Icon::Loot, d.cat);
+                    ++counts[3];
+                }
+            } else if (shareStashLoot && loot::shown(loot::kStashLoot, d.cat)) {
+                if (special == webmap::kStashLootLimit) continue;
+                add(d.pos.x, d.pos.z, radar::Icon::Loot, d.cat);
+                frame.dots.back().webStashLoot = true;
+                ++special;
+            } else if (shareLoot && !d.mapOnly && ordinary < 512 && loot::visible(gSettings.dzLootCats, d.cat, d.name)) {
+                add(d.pos.x, d.pos.z, radar::Icon::Loot, d.cat);
+                ++ordinary;
+            }
         }
     }
     webmap::publish(id, std::move(frame));
@@ -2568,6 +2747,8 @@ bool drawDayzFrame() {
     const bool eventMapMatches = gSettings.dzMapAuto || snap.mapId.empty() || snap.mapId == gSettings.dzMap;
     gDzVisibleEvents = eventMapMatches && snap.eventRevision == gDzEventRevision.load(std::memory_order_relaxed) &&
         snap.tUs && nowUs - snap.tUs <= 1500000 ? snap.events : nullptr;
+    gDzVisibleCorpses = eventMapMatches && snap.corpseMapRevision == gDzCorpseMapRevision.load(std::memory_order_relaxed) &&
+        snap.tUs && nowUs - snap.tUs <= 1500000 ? snap.corpses : nullptr;
     if (snap.tUs) tel::time(tel::T_SNAPAGE, nowUs - snap.tUs);
     const bool sameWorld = snap.world && cs.world == snap.world;
     const bool recentPose = sameWorld && dayz_camera::fresh(cs.tUs, nowUs, 250000);
@@ -2826,6 +3007,9 @@ constexpr DzIcon kIconLoot[loot::Count] = {
     {"...#...", ".#####.", ".##.##.", "###.###", ".##.##.", ".#####.", "...#..."},
     {"...#...", "..###..", ".#####.", "#######", ".##.##.", ".##.##.", ".##.##."},
     {"...#...", "...#...", "#######", ".#####.", "..###..", ".##.##.", "#.....#"},
+    {"..###..", ".#####.", "#######", "#..#..#", "#######", "#.....#", "#######"},
+    {".###...", "#...#..", "#...#..", ".######", "....#.#", "......#", "......."},
+    {".......", "..###..", ".#####.", "#######", "#######", ".#...#.", "......."},
 };
 
 void drawDzIcon(Canvas& cv, const char* const* icon, int cx, int cy, int cell, COLORREF col) {
@@ -2911,14 +3095,16 @@ float drawRadarView(Canvas& cv, const RECT& area, const Vec3& c, float R, bool f
     for (int pass = 0; pass < 4; ++pass)
     for (const RadarPt& p : gDzRadar.pts) {
         if (layer(p.kind) != pass) continue;
-        if (p.kind == 2 && !gSettings.dzInfected) continue;
+        if ((p.kind == 2 && !gSettings.dzInfected) || (p.kind == 4 && !gSettings.dzVehicles)) continue;
         const int px = int(sx(p.x)), py = int(sy(p.z));
         const bool loot = p.kind >= 10;
-        if (loot && !::loot::visible(gSettings.dzLootCats, p.kind - 10, p.name ? *p.name : std::string())) continue;
+        if (loot && !::loot::mapVisible(gSettings.dzLoot, gSettings.dzLootCats, gSettings.dzRadarStashLoot,
+                                      p.kind - 10, p.name ? *p.name : std::string())) continue;
         const COLORREF col = loot ? dzLootColor(p.kind - 10) : dzKindColor(p.kind, !(p.name && friends::contains(*p.name)));
         int hs = 0;
         if (loot) {
-            const int cell = (p.kind == 10 + LC_Rare) ? entCell : lootCell;
+            const bool highlighted = p.kind == 10 + LC_Rare || ::loot::shown(gSettings.dzRadarStashLoot, p.kind - 10);
+            const int cell = highlighted ? entCell : lootCell;
             hs = 7 * cell / 2 + 1;
             if (px - hs < l || px + hs >= r || py - hs < t || py + hs >= b) continue;
             drawDzIcon(cv, kIconLoot[std::clamp(p.kind - 10, 0, ::loot::Count - 1)], px, py, cell, col);
@@ -2933,7 +3119,8 @@ float drawRadarView(Canvas& cv, const RECT& area, const Vec3& c, float R, bool f
         }
         if (!gSettings.dzRadarNames || !p.name) continue;
         const float d = std::sqrt((p.x - me.x) * (p.x - me.x) + (p.z - me.z) * (p.z - me.z));
-        const bool label = loot ? (p.kind == 10 + LC_Rare || d <= float(std::max(25, gSettings.dzRadarLootLabel))) : p.kind != 2;
+        const bool label = loot ? (p.kind == 10 + LC_Rare || ::loot::shown(gSettings.dzRadarStashLoot, p.kind - 10) ||
+                                  d <= float(std::max(25, gSettings.dzRadarLootLabel))) : p.kind != 2;
         if (!label) continue;
         char txt[96];
         if (loot) std::snprintf(txt, sizeof txt, "%s", p.name->c_str());
@@ -3044,6 +3231,11 @@ void drawScene(Canvas& cv) {
             char info[64];
             std::snprintf(info, sizeof info, b.weapon.empty() ? "%.0fm" : "%.0fm  %s", b.dist, b.weapon.c_str());
             cv.text(info, {l - 80, btm + 1, r + 80, btm + 16}, col, DT_CENTER | DT_TOP);
+        }
+        if (opt.dzEspHealth && player_health::valid(b.health)) {
+            const auto hp = player_health::label(b.health);
+            const int y = btm + (opt.info ? 16 : 1);
+            cv.text(hp.c_str(), {l - 80, y, r + 80, y + 15}, col, DT_CENTER | DT_TOP);
         }
     }
 
@@ -3176,6 +3368,9 @@ void stopEsp() {
     webmap::clear();
     ++gDzEventRevision;
     gDzVisibleEvents.reset();
+    ++gDzCorpseMapRevision;
+    gDzVisibleCorpses.reset();
+    gDzCorpseTracker.clear();
     gDzEntKind.clear();
     gDzEntPos.clear();
     gDzEntVs.clear();
@@ -3276,6 +3471,7 @@ void syncRadarScreen() {
         if (!detected.empty() && gSettings.dzMapAuto && gSettings.dzMap != detected) {
             gSettings.dzMap = detected;
             ++gDzEventRevision;
+            gDzVisibleCorpses.reset();
             gDzVisibleEvents.reset();
             saveSettings(gSettings);
         }
@@ -3300,6 +3496,7 @@ void syncRadarScreen() {
 
     radar::Frame fr;
     fr.events = gDzVisibleEvents;
+    fr.corpses = gDzVisibleCorpses;
     fr.ok = gDzRadar.ok;
     if (fr.ok) {
         fr.meX = gDzRadar.me.x;
@@ -3307,6 +3504,7 @@ void syncRadarScreen() {
         fr.fwdX = gDzRadar.fwd.x;
         fr.fwdZ = gDzRadar.fwd.z;
         fr.meName = gDzMeNameDraw;
+        fr.meHealth = gDzRadarSnap.meHealth;
         fr.mapBase = dzMapBase(gSettings.dzMap);
         fr.mapSize = dzMapSize(gSettings.dzMap);
         const Vec3& me = gDzRadar.me;
@@ -3345,6 +3543,7 @@ void syncRadarScreen() {
                 }
                 dot.label = txt;
             }
+            if (p.kind == 1) dot.health = p.health;
             if (!isLoot && p.name) dot.name = *p.name;
             fr.dots.push_back(std::move(dot));
         }
@@ -3367,8 +3566,12 @@ void syncRadarScreen() {
     radar::Config cfg;
     cfg.webmap = gSettings.webmap;
     cfg.events = gSettings.dzRadarEvents;
+    cfg.corpses = gSettings.dzRadarCorpses;
+    cfg.health = gSettings.dzRadarHealth;
+    cfg.healthStatus = gDzRadarSnap.healthStatus;
     cfg.loot = gSettings.dzLoot;
     cfg.lootMask = gSettings.dzLootCats & loot::kAll;
+    cfg.stashLootMask = gSettings.dzRadarStashLoot;
     cfg.filter = loot::filter();
     cfg.headings = gSettings.dzRadarHeadings;
     cfg.headingLen = gSettings.dzRadarHeadingLen;
@@ -3379,6 +3582,7 @@ void syncRadarScreen() {
     cfg.esp.fps = gSettings.fps;
     cfg.esp.uncapped = gSettings.uncapped;
     cfg.esp.held = gSettings.dzHeld;
+    cfg.esp.health = gSettings.dzEspHealth;
     cfg.esp.valuables = gSettings.dzLootValuables;
     cfg.esp.minimap = gSettings.dzRadar;
     cfg.esp.minimapSize = gSettings.dzRadarSize;
@@ -3426,7 +3630,6 @@ void syncRadarScreen() {
     if (cfg.webmapChanged) {
         gSettings.webmap = cfg.webmap;
         updateWebmapReaders();
-        webmap::configure(gSettings.webmap, exeDir());
         saveSettingsSoon();
     }
     if (cfg.openWebmap) {
@@ -3446,6 +3649,7 @@ void syncRadarScreen() {
     if (cfg.changed) {
         gSettings.dzLoot = cfg.loot;
         gSettings.dzLootCats = cfg.lootMask;
+        gSettings.dzRadarStashLoot = cfg.stashLootMask;
         loot::setFilter(cfg.filter);
         const loot::Filter fl = loot::filter();
         gSettings.dzFilterMode = fl.mode;
@@ -3472,6 +3676,9 @@ void syncRadarScreen() {
         gSettings.dzInfected = cfg.infected;
         gSettings.dzRadarNames = cfg.names;
         gSettings.dzRadarEvents = cfg.events;
+        gSettings.dzRadarCorpses = cfg.corpses;
+        gSettings.dzRadarHealth = cfg.health;
+        gSettings.dzEspHealth = cfg.esp.health;
         updateWebmapReaders();
         gSettings.dzRadarLootLabel = cfg.lootLabelRange;
         gSettings.dzRadarMarker = cfg.markerScale;
@@ -3480,7 +3687,9 @@ void syncRadarScreen() {
         if (cfg.mapAuto && !gSettings.dzMapAuto) gDzMapRedetect = true;
         if (gSettings.dzMap != cfg.map || gSettings.dzMapAuto != cfg.mapAuto) {
             ++gDzEventRevision;
+            ++gDzCorpseMapRevision;
             gDzVisibleEvents.reset();
+            gDzVisibleCorpses.reset();
         }
         gSettings.dzMapAuto = cfg.mapAuto;
         gSettings.dzMap = cfg.map;
@@ -3694,9 +3903,11 @@ void startEsp() {
             if (*cancel) return;
             if (dma) {
                 const uint64_t before = qpcUs();
-                const bool keyboardReady = res->proc->prepareRemoteKeys();
-                logLine("[log] PCIe keyboard setup before capture: %s (%.1f ms)",
-                        keyboardReady ? "ready" : "unavailable", double(qpcUs() - before) / 1000.0);
+                std::string keyboardDetail;
+                const bool keyboardReady = res->proc->prepareRemoteKeys(keyboardDetail);
+                logLine("[log] PCIe keyboard setup before capture: %s (%.1f ms) %s",
+                        keyboardReady ? "ready" : "unavailable", double(qpcUs() - before) / 1000.0,
+                        keyboardDetail.c_str());
             }
             if (*cancel) return;
             Image img;
@@ -3897,7 +4108,6 @@ int main(int argc, char** argv) {
 #ifndef HIRSCHGANGWARE_NO_DIAG
     openLog();
     trigger::setLog([](const char* s) { logLine("%s", s); });
-    webmap::configure(gSettings.webmap, exeDir());
     updateWebmapReaders();
     trigger::setRemoteKeys([] { return gProc ? gProc->remoteKeySample() : dma_keyboard::Sample{}; });
     installCrashHandlers();

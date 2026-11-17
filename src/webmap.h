@@ -7,10 +7,12 @@ namespace webmap {
 
 enum Release : unsigned {
     CurrentMap = 1, Own = 2, Heading = 4, Players = 8, Infected = 16,
-    Animals = 32, Vehicles = 64, Loot = 128, PlayerNames = 256, PlayerHeld = 512, Events = 1024
+    Animals = 32, Vehicles = 64, Loot = 128, PlayerNames = 256, PlayerHeld = 512, Events = 1024, Corpses = 2048, PlayerHealth = 4096,
+    StashLoot = 8192
 };
 constexpr unsigned AllReleases = CurrentMap | Own | Heading | Players | Infected | Animals |
-                                 Vehicles | Loot | PlayerNames | PlayerHeld | Events;
+                                 Vehicles | Loot | PlayerNames | PlayerHeld | Events | Corpses | PlayerHealth | StashLoot;
+constexpr unsigned kStashLootLimit = 512;
 
 struct Options {
     bool enabled = false;

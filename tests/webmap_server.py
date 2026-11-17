@@ -251,6 +251,8 @@ try:
         {"x": 700, "z": 1020, "kind": "loot-cluster", "label": "Loot-H\u00e4ufung"},
     ]
     assert snap["layers"]["players"][0]["held"] == "GZ_TestRifle"
+    assert snap["layers"]["vehicles"] == [{"x": 490, "z": 1080}, {"x": 710, "z": 1080, "covered": True}]
+    assert all(dot["z"] != 1080 for dot in snap["layers"]["loot"])
     assert snap["heldShared"] is True
     assert snap["me"]["held"] == "OwnRifle"
     assert "held" not in snap["layers"]["players"][1]
@@ -270,6 +272,27 @@ try:
     snap, _ = released("mapchange", lambda p: p["map"] == "different")
     assert snap["layers"]["events"] == []
     released("maphome", lambda p: p["map"] == "chernarusplus")
+
+    snap, packet = released("vehicles-only", lambda p: set(p["layers"]) == {"vehicles"})
+    assert snap["layers"]["vehicles"] == [{"x": 490, "z": 1080}, {"x": 710, "z": 1080, "covered": True}]
+    assert b"TestCar" not in packet and b"Motorbike_Red_Cover" not in packet
+    snap, _ = released("on", lambda p: set(p["layers"]) == {"loot"})
+    assert all(dot["z"] != 1080 for dot in snap["layers"]["loot"])
+
+    snap, packet = released("stash-only", lambda p: set(p["layers"]) == {"stashLoot"})
+    assert snap["layers"]["stashLoot"] == [
+        {"x": 450, "z": 960, "kind": "backpack"},
+        {"x": 560, "z": 960, "kind": "vehicle-key"},
+        {"x": 670, "z": 960, "kind": "stash"},
+    ]
+    assert all(label not in packet for label in
+               (b"Hammer", b"private-item", b"HuntingBag_Autumn", b"ExpansionCarKey_Red", b"UndergroundStash"))
+    released("take-backpack", lambda p: len(p["layers"].get("stashLoot", [])) == 2)
+    snap, _ = released("mapchange", lambda p: p["map"] == "different")
+    assert snap["layers"]["stashLoot"] == []
+    released("maphome", lambda p: p["map"] == "chernarusplus")
+    _, packet = released("on", lambda p: set(p["layers"]) == {"loot"})
+    assert b"stashLoot" not in packet and b"UndergroundStash" not in packet
 
     server.stdin.write("off\n")
     server.stdin.flush()

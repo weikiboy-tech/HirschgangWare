@@ -23,10 +23,14 @@ enum Cat : int {
     VehiclePart,
     Base,
     Rare,
+    Stash,
+    VehicleKey,
+    CoveredVehicle,
     Count
 };
 
 constexpr unsigned kAll = (1u << Count) - 1;
+constexpr unsigned kStashLoot = (1u << Bag) | (1u << Stash) | (1u << VehicleKey);
 
 struct Info {
     const char* name;
@@ -35,7 +39,7 @@ struct Info {
 };
 const Info& info(int cat);
 
-inline bool shown(unsigned mask, int cat) { return cat >= 0 && cat < Count && (mask >> cat & 1u) != 0; }
+constexpr bool shown(unsigned mask, int cat) { return cat >= 0 && cat < Count && (mask >> cat & 1u) != 0; }
 
 bool valuable(int cat);
 
@@ -65,6 +69,10 @@ Filter filter();
 bool listed(const std::string& name);
 
 bool visible(unsigned mask, int cat, const std::string& name);
+inline bool mapVisible(bool groundLoot, unsigned mask, unsigned stashLoot, int cat, const std::string& name) {
+    if (cat == CoveredVehicle) return shown(mask, cat);
+    return shown(stashLoot, cat) || (groundLoot && visible(mask, cat, name));
+}
 
 std::string serializeList(const std::vector<FilterEntry>& list);
 std::vector<FilterEntry> parseList(const std::string& s);

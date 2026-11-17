@@ -350,28 +350,48 @@ private:
 
     DWORD virtFlags() const { return VMMDLL_FLAG_NOCACHE | (noPaging_ && !pagingOk_ ? VMMDLL_FLAG_NOPAGING : 0); }
 
-    bool prepareRemoteKeys() override {
+    bool prepareRemoteKeys(std::string& detail) override {
         // Called before the capture threads start. Resolving the bitmap scans whole
         // executable sections and would monopolize the FPGA during live reads.
-        if (!vmm_ || !remoteModule_ || !remoteProcesses_ || !remoteProcess_ || !remoteRegistry_) return false;
+        if (!vmm_ || !remoteModule_ || !remoteProcesses_ || !remoteProcess_ || !remoteRegistry_) {
+            detail = "keyboard provider unavailable";
+            return false;
+        }
 
         VMMDLL_PROCESS_INFORMATION game{};
         game.magic = VMMDLL_PROCESS_INFORMATION_MAGIC;
         game.wVersion = VMMDLL_PROCESS_INFORMATION_VERSION;
         game.wSize = sizeof game;
         SIZE_T size = sizeof game;
-        if (!remoteProcess_(vmm_, pid_, &game, &size) || !game.win.dwSessionId) return false;
+        if (!remoteProcess_(vmm_, pid_, &game, &size) || !game.win.dwSessionId) {
+            detail = "could not read the game Windows session";
+            return false;
+        }
 
         const dma_keyboard::Reader reader{vmm_, readEx_, remoteModule_, remoteProcesses_, memFree_, remoteRegistry_};
-        try {
-            const auto [build, revision] = reader.version();
-            // Enable the undocumented bitmap only on the build exercised by the two-PC test.
-            if (build != 26200 || revision != 9711) return false;
-            remoteAddress_ = dma_keyboard::resolve(reader, game.win.dwSessionId);
-        } catch (const std::exception&) {
-            remoteAddress_ = {};
+        for (int attempt = 0; attempt < 2; ++attempt) {
+            try {
+                const auto [build, revision] = reader.version();
+                // The production bitmap layout is only verified on this build.
+                if (build != 26200 || revision != 9711) {
+                    detail = "unverified Windows build " + std::to_string(build) + "." + std::to_string(revision);
+                    return false;
+                }
+                bool partial = false;
+                remoteAddress_ = dma_keyboard::resolve(reader, game.win.dwSessionId, false, true, &partial);
+                detail = partial ? "corroborated signatures in readable pages (test E on the main PC)"
+                                 : attempt ? "ready after refreshing VMM" : "ready";
+                return true;
+            } catch (const std::exception& e) {
+                if (attempt == 0) detail = e.what();
+                else detail += std::string(" Retry: ") + e.what();
+            }
+            if (attempt == 0 && configSet_) {
+                configSet_(vmm_, VMMDLL_OPT_REFRESH_FREQ_TLB, 1);
+                configSet_(vmm_, VMMDLL_OPT_REFRESH_FREQ_MEDIUM, 1);
+            }
         }
-        return remoteAddress_.va != 0;
+        return false;
     }
 
     void pollKeyboard(uint64_t now) {

@@ -176,6 +176,7 @@ struct Layer {
     Release release;
     radar::Icon icon;
     const char* label;
+    bool stashLoot = false;
 };
 
 constexpr Layer kLayers[] = {
@@ -184,7 +185,17 @@ constexpr Layer kLayers[] = {
     {Animals, radar::Icon::Animal, "animals"},
     {Vehicles, radar::Icon::Vehicle, "vehicles"},
     {Loot, radar::Icon::Loot, "loot"},
+    {StashLoot, radar::Icon::Loot, "stashLoot", true},
 };
+
+const char* stashLootKind(int category) {
+    switch (category) {
+        case loot::Bag: return "backpack";
+        case loot::VehicleKey: return "vehicle-key";
+        case loot::Stash: return "stash";
+        default: return nullptr;
+    }
+}
 
 void appendHeading(std::ostream& out, float x, float z) {
     if (std::isfinite(x) && std::isfinite(z) && std::hypot(x, z) > 0.001f)
@@ -231,6 +242,7 @@ std::string packet(const Options& opt, const std::shared_ptr<const Snapshot>& sn
         if (opt.shares(Heading)) appendHeading(out, fr.fwdX, fr.fwdZ);
         appendPlayerName(out, opt, fr.meName);
         appendHeld(out, opt, fr.meHeld);
+        if (opt.shares(PlayerHealth) && player_health::valid(fr.meHealth)) out << ",\"health\":" << fr.meHealth;
         out << '}';
     } else {
         out << "null";
@@ -244,20 +256,32 @@ std::string packet(const Options& opt, const std::shared_ptr<const Snapshot>& sn
         out << json(layer.label) << ":[";
         unsigned count = 0;
         for (const auto& d : snap->frame.dots) {
-            if (d.icon != layer.icon || !inside(d.x, d.z, snap->frame.mapSize)) continue;
+            const bool covered = d.icon == radar::Icon::Loot && d.cat == loot::CoveredVehicle;
+            const auto icon = covered ? radar::Icon::Vehicle : d.icon;
+            if (icon != layer.icon || d.webStashLoot != layer.stashLoot ||
+                !inside(d.x, d.z, snap->frame.mapSize)) continue;
+            const char* kind = layer.stashLoot ? stashLootKind(d.cat) : nullptr;
+            if (layer.stashLoot && !kind) continue;
             if (count++) out << ',';
             out << "{\"x\":" << d.x << ",\"z\":" << d.z;
-            if (d.icon == radar::Icon::Loot) out << ",\"category\":" << d.cat;
+            if (kind) {
+                out << ",\"kind\":" << json(kind);
+            } else if (covered) {
+                out << ",\"covered\":true";
+            } else if (icon == radar::Icon::Loot) {
+                out << ",\"category\":" << d.cat;
+            }
             if (d.icon == radar::Icon::Survivor) {
                 appendHeading(out, d.fwdX, d.fwdZ);
                 appendPlayerName(out, opt, d.name);
                 appendHeld(out, opt, d.held);
+                if (opt.shares(PlayerHealth) && player_health::valid(d.health)) out << ",\"health\":" << d.health;
                 if (d.webFriend) out << ",\"friend\":true";
                 if (d.webTrackId && !trackingSession().empty())
                     out << ",\"id\":\"" << trackingSession() << '-' << d.webTrackId << '"';
             }
             out << '}';
-            if (count == 512) break;
+            if (count == (layer.stashLoot ? kStashLootLimit : 512)) break;
         }
         out << ']';
     }
@@ -275,9 +299,26 @@ std::string packet(const Options& opt, const std::shared_ptr<const Snapshot>& sn
         }
         out << ']';
     }
+    if (!map.empty() && opt.shares(Corpses)) {
+        if (!firstLayer) out << ',';
+        out << "\"corpses\":[";
+        const uint64_t now = GetTickCount64();
+        const std::string& session = trackingSession();
+        unsigned count = 0;
+        if (!session.empty() && snap->frame.corpses) for (const auto& corpse : *snap->frame.corpses) {
+            if (corpse.expiresAt <= now || !inside(corpse.pos.x, corpse.pos.z, snap->frame.mapSize)) continue;
+            if (count++) out << ',';
+            out << "{\"x\":" << corpse.pos.x << ",\"z\":" << corpse.pos.z
+                << ",\"id\":\"" << session << '-' << corpse.id << "\",\"ttlMs\":"
+                << std::min(corpse.expiresAt - now, radar_corpse::kLifetimeMs) << '}';
+            if (count == radar_corpse::kMaxMarkers) break;
+        }
+        out << ']';
+    }
     out << '}';
     if (!map.empty()) {
         out << ",\"heldShared\":" << (opt.shares(PlayerHeld) && (opt.shares(Own) || opt.shares(Players)) ? "true" : "false");
+        out << ",\"healthShared\":" << (opt.shares(PlayerHealth) && (opt.shares(Own) || opt.shares(Players)) ? "true" : "false");
     }
     out << '}';
     return out.str();

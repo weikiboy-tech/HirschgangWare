@@ -55,12 +55,39 @@ values keep their meaning. For example,
 `webmap_release=7` publishes the current map and own marker with heading.
 The map bit is required for all live data, and own position is required for
 heading. Loot also requires the local loot reader and respects its category
-and name filters. The local infected, animal and vehicle visibility settings also apply to their released layers. Browser filters only hide already released markers.
+and name filters. The local infected and animal visibility settings also apply to their released layers. Browser filters only hide already released markers.
 Server positions outside the selected world's bounds and nonfinite positions
 are discarded. The own position is derived from the game snapshot. Friend
 markers use the same name-based list as the local radar and update in all
 connected browsers. A valid heading is drawn as a short line. **Own heading**
 enables that line and Heading-Up for the own marker.
+
+**Backpacks, vehicle keys & stashes** in the desktop **Loot** menu shows
+these three categories even while ordinary **Ground loot** is off. It is
+enabled by default and saved locally. When Webmap and **Publish current
+map** are enabled, the same switch shares these markers with connected
+viewers (release bit 8192 mirrors the desktop setting).
+Viewers can enable or disable **Rucksäcke, Fahrzeugschlüssel & Stashes**
+under **Ebenen** independently of other viewers. The browser remembers
+their choice. The WebRadar accepts up to 512 markers on this layer.
+The browser draws the backpack, key, and stash as small icons. The live
+packet includes their coordinates and types.
+
+**Loot → Vehicles + Covered** changes both the **Covered Vehicles** loot
+category and **Players & World → Vehicles** together. The two original
+controls are available individually. The WebRadar shares each enabled
+type when the current map is published. Covered markers carry
+`covered: true` in the shared vehicle layer.
+The browser's **Ebenen → Fahrzeuge** switch hides or shows both types
+as car icons. Covered vehicles remain available with ordinary Ground Loot off.
+
+Markers come from the client’s world-object and ground-loot snapshots. A
+backpack behind foliage is still a backpack. The reader also recognizes
+`UndergroundStash` and `HiddenStash` objects when the client exposes their
+class and position. Server-specific classes can be assigned in
+`dayz_loot_cats.txt` with `stash ClassName`, `vehiclekey ClassName` or
+`bag ClassName`. Reload by restarting the launcher. Stash contents and
+objects outside the client’s loaded tables are outside this data path.
 
 **Player names** shares available in-game names with authorized browsers for
 the Tracking dropdown and marker captions. **Held items** independently shares

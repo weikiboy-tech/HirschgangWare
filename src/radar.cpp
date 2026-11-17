@@ -558,6 +558,23 @@ void drawGlyph(ImDrawList* dl, ImVec2 c, float s, int glyph, ImU32 col, ImU32 bg
             g.rect(-0.62f, -0.1f, 0.62f, 0.82f, col);
             g.rect(-0.18f, 0.32f, 0.18f, 0.82f, bg);
             break;
+        case loot::Stash:
+            g.rect(-0.8f, -0.55f, 0.8f, 0.65f, col, 0.12f);
+            g.line(-0.8f, -0.08f, 0.8f, -0.08f, bg, stroke);
+            g.rect(-0.18f, -0.19f, 0.18f, 0.14f, bg);
+            break;
+        case loot::VehicleKey:
+            g.ring(-0.45f, 0, 0.36f, col, stroke);
+            g.line(-0.08f, 0, 0.86f, 0, col, stroke);
+            g.line(0.63f, 0, 0.63f, 0.43f, col, stroke);
+            break;
+        case loot::CoveredVehicle:
+            g.poly({{-0.92f, 0.45f}, {-0.85f, -0.1f}, {-0.47f, -0.66f}, {0.42f, -0.66f},
+                    {0.77f, -0.2f}, {0.94f, 0.45f}}, col);
+            g.line(-0.65f, 0.06f, 0.67f, 0.06f, bg, stroke);
+            g.circle(-0.54f, 0.48f, 0.19f, col);
+            g.circle(0.54f, 0.48f, 0.19f, col);
+            break;
         case loot::Rare: {
             ImVec2 v[10];
             for (int i = 0; i < 10; ++i) {
@@ -645,7 +662,7 @@ Counts countDots(const Frame& f, const Config& cfg, bool names) {
             case Icon::Loot:
                 if (d.cat >= 0 && d.cat < loot::Count) ++n.cat[d.cat];
                 ++n.lootTotal;
-                if (loot::visible(cfg.lootMask, d.cat, d.label)) ++n.lootShown;
+                if (loot::mapVisible(cfg.loot, cfg.lootMask, cfg.stashLootMask, d.cat, d.label)) ++n.lootShown;
                 if (names && !d.label.empty()) ++n.names[d.label];
                 break;
             case Icon::Survivor: ++n.survivors; break;
@@ -773,7 +790,7 @@ void drawRadar(const Frame& f, Config& cfg, const Counts& n) {
     struct Lab {
         ImVec2 at;
         ImU32 col;
-        const std::string* text;
+        std::string text;
     };
     struct Hit {
         ImVec2 p;
@@ -786,8 +803,8 @@ void drawRadar(const Frame& f, Config& cfg, const Counts& n) {
     for (int pass = 0; pass < 4; ++pass)
         for (const Dot& d : f.dots) {
             if (order(d.icon) != pass) continue;
-            if (d.icon == Icon::Infected && !cfg.infected) continue;
-            if (d.icon == Icon::Loot && !loot::visible(cfg.lootMask, d.cat, d.label)) continue;
+            if ((d.icon == Icon::Infected && !cfg.infected) || (d.icon == Icon::Vehicle && !cfg.vehicles)) continue;
+            if (d.icon == Icon::Loot && !loot::mapVisible(cfg.loot, cfg.lootMask, cfg.stashLootMask, d.cat, d.label)) continue;
             const float px = sx(d.x), py = sy(d.z);
             if (px < left - 12 || px >= w + 12 || py < -12 || py >= h + 12) continue;
             const ImVec2 c(px, py);
@@ -836,19 +853,25 @@ void drawRadar(const Frame& f, Config& cfg, const Counts& n) {
                     break;
             }
             hits.push_back({c, r, &d});
-            if (!cfg.names || d.label.empty()) continue;
-            if (d.icon == Icon::Loot && d.cat != loot::Rare) {
+            const bool hp = cfg.health && d.icon == Icon::Survivor && player_health::valid(d.health);
+            std::string text = cfg.names ? d.label : std::string();
+            if (hp) {
+                if (!text.empty()) text += "\n";
+                text += player_health::label(d.health);
+            }
+            if (text.empty()) continue;
+            if (d.icon == Icon::Loot && d.cat != loot::Rare && !loot::shown(cfg.stashLootMask, d.cat)) {
                 const float dx = d.x - f.meX, dz = d.z - f.meZ;
                 if (dx * dx + dz * dz > float(cfg.lootLabelRange) * float(cfg.lootLabelRange)) continue;
             }
             const ImU32 lc = d.icon == Icon::Loot ? col32(loot::info(d.cat).color) : col32(d.color);
-            labels.push_back({ImVec2(px + r + 6, py - 8.f), lc, &d.label});
+            labels.push_back({ImVec2(px + r + 6, py - 8.f), lc, std::move(text)});
         }
 
     std::vector<ImVec4> taken;
     for (auto it = labels.rbegin(); it != labels.rend(); ++it) {
         const Lab& L = *it;
-        const ImVec2 sz = textSize(gFont, 13.f, L.text->c_str());
+        const ImVec2 sz = textSize(gFont, 13.f, L.text.c_str());
         const ImVec4 rc(L.at.x - 4, L.at.y - 2, L.at.x + sz.x + 5, L.at.y + sz.y + 2);
         bool clash = false;
         for (const ImVec4& tk : taken)
@@ -860,7 +883,7 @@ void drawRadar(const Frame& f, Config& cfg, const Counts& n) {
         taken.push_back(rc);
         dl->AddRectFilled(ImVec2(rc.x, rc.y), ImVec2(rc.z, rc.w), IM_COL32(12, 14, 18, 215), 4.f);
         dl->AddRectFilled(ImVec2(rc.x, rc.y), ImVec2(rc.x + 3.f, rc.w), L.col, 4.f, ImDrawFlags_RoundCornersLeft);
-        dl->AddText(gFont, 13.f, L.at, th::Text, L.text->c_str());
+        dl->AddText(gFont, 13.f, L.at, th::Text, L.text.c_str());
     }
 
     if (cfg.events && f.events) for (const auto& event : *f.events) {
@@ -875,6 +898,53 @@ void drawRadar(const Frame& f, Config& cfg, const Counts& n) {
         if (cfg.names)
             haloText(dl, gBold, 13.f, ImVec2(px + r + 5.f, py - 7.f), col, radar_event::label(event.kind));
     }
+
+    static std::unordered_map<uint32_t, uint64_t> hiddenCorpses;
+    static uint32_t firstCorpseClick = 0;
+    static uint64_t firstCorpseClickAt = 0;
+    const uint64_t corpseNow = GetTickCount64();
+    for (auto it = hiddenCorpses.begin(); it != hiddenCorpses.end();) {
+        if (it->second <= corpseNow) it = hiddenCorpses.erase(it);
+        else ++it;
+    }
+    const ImGuiIO& corpseInput = ImGui::GetIO();
+    const auto button = ImGuiMouseButton_Left;
+    const bool click = ImGui::IsMouseReleased(button);
+    const bool mapClick = click && !corpseInput.WantCaptureMouse && corpseInput.MousePos.x >= left &&
+        corpseInput.MouseDragMaxDistanceSqr[button] <= 16.f;
+    const radar_corpse::Marker* hitCorpse = nullptr;
+    float hitDistance = 11.f * 11.f;
+    if (cfg.corpses && f.corpses) for (const auto& corpse : *f.corpses) {
+        if (corpse.expiresAt <= corpseNow || hiddenCorpses.count(corpse.id) ||
+            corpse.pos.x > M || corpse.pos.z > M) continue;
+        const float x = sx(corpse.pos.x), y = sy(corpse.pos.z);
+        if (x < left || x >= w || y < 0 || y >= h) continue;
+        const float dx = x - corpseInput.MousePos.x, dy = y - corpseInput.MousePos.y;
+        if (!corpseInput.WantCaptureMouse && dx * dx + dy * dy < hitDistance) {
+            hitCorpse = &corpse;
+            hitDistance = dx * dx + dy * dy;
+        }
+        constexpr ImU32 bone = IM_COL32(250, 240, 214, 255);
+        dl->AddCircleFilled(ImVec2(x, y), 8.f, th::Edge);
+        dl->AddCircleFilled(ImVec2(x, y - 1.f), 5.3f, bone);
+        dl->AddRectFilled(ImVec2(x - 3.f, y + 1.f), ImVec2(x + 3.f, y + 5.f), bone, 1.f);
+        dl->AddCircleFilled(ImVec2(x - 2.f, y - 1.f), 1.3f, th::Edge);
+        dl->AddCircleFilled(ImVec2(x + 2.f, y - 1.f), 1.3f, th::Edge);
+        dl->AddLine(ImVec2(x, y + 2.f), ImVec2(x, y + 4.f), th::Edge);
+    }
+    if (click) {
+        const uint32_t clickedId = mapClick && hitCorpse ? hitCorpse->id : 0;
+        const auto doubleClickMs = uint64_t(corpseInput.MouseDoubleClickTime * 1000.f);
+        if (clickedId && clickedId == firstCorpseClick && corpseNow - firstCorpseClickAt <= doubleClickMs) {
+            hiddenCorpses[clickedId] = hitCorpse->expiresAt;
+            firstCorpseClick = 0;
+        } else {
+            firstCorpseClick = clickedId;
+            firstCorpseClickAt = corpseNow;
+        }
+    }
+    if (hitCorpse && !gDrag && (!click || firstCorpseClick))
+        ImGui::SetTooltip("Corpse - double-click to hide");
 
     float fx = f.fwdX, fz = f.fwdZ;
     const float fl = std::sqrt(fx * fx + fz * fz);
@@ -894,6 +964,10 @@ void drawRadar(const Frame& f, Config& cfg, const Counts& n) {
     } else {
         dl->AddCircleFilled(ImVec2(bx, by), 6.f, IM_COL32(255, 255, 255, 255), 0);
         dl->AddCircle(ImVec2(bx, by), 6.f, IM_COL32(8, 30, 28, 255), 0, 1.8f);
+    }
+    if (cfg.health && player_health::valid(f.meHealth) && bx >= left && bx < w && by >= 0 && by < h) {
+        const auto hp = player_health::label(f.meHealth);
+        haloText(dl, gBold, 13.f, ImVec2(bx + 17.f, by - 8.f), th::Text, hp.c_str());
     }
     if (cfg.names && !f.meName.empty() && false) {
         const ImVec2 at(bx + 20.f, by - 8.f);
@@ -1500,6 +1574,8 @@ void drawSettingsBody(Config& cfg, const Counts& n, bool live, const std::vector
         ch |= switchRow("Names", &e.names);
         ch |= switchRow("Distance", &e.distance);
         ch |= switchRow("Held item", &e.held);
+        ch |= switchRow("Health (0-100)", &e.health);
+        if (e.health) ImGui::TextDisabled("%s", player_health::statusText(cfg.healthStatus));
         ch |= switchRow("Zombies", &cfg.infected);
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("infected on the overlay, minimap and radar; off also stops reading them");
         ch |= switchRow("Valuable loot only", &e.valuables);
@@ -1560,6 +1636,21 @@ void drawSettingsBody(Config& cfg, const Counts& n, bool live, const std::vector
     drawTriggerSection(ch);
 
     section("LOOT");
+    bool stashLoot = cfg.stashLootMask != 0;
+    if (switchRow("Backpacks, vehicle keys & stashes", &stashLoot)) {
+        cfg.stashLootMask = stashLoot ? loot::kStashLoot : 0;
+        ch = true;
+    }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Also shares these markers when Webmap and Publish current map are enabled.");
+    constexpr unsigned coveredMask = 1u << loot::CoveredVehicle;
+    bool vehicleBundle = cfg.vehicles && loot::shown(cfg.lootMask, loot::CoveredVehicle);
+    if (switchRow("Vehicles + Covered", &vehicleBundle)) {
+        cfg.vehicles = vehicleBundle;
+        if (vehicleBundle) cfg.lootMask |= coveredMask;
+        else cfg.lootMask &= ~coveredMask;
+        ch = true;
+    }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Switches Vehicles and Covered Vehicles together. Both are shared when Webmap publishes the current map.");
     {
         const float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
         ImGui::AlignTextToFramePadding();
@@ -1570,8 +1661,8 @@ void drawSettingsBody(Config& cfg, const Counts& n, bool live, const std::vector
         ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 2.f);
         ch |= toggleSwitch("##loot", &cfg.loot);
     }
-    ImGui::BeginDisabled(!cfg.loot);
     {
+        ImGui::BeginDisabled(!cfg.loot);
         const unsigned valuables = maskOf({loot::Gun, loot::Ammo, loot::Attachment, loot::Explosive, loot::Bag, loot::Rare});
         const unsigned survival = maskOf({loot::Food, loot::Drink, loot::Medical, loot::Tool});
         const float cw = (ImGui::GetContentRegionAvail().x - 3 * 6.f) / 4.f;
@@ -1586,15 +1677,19 @@ void drawSettingsBody(Config& cfg, const Counts& n, bool live, const std::vector
         if (chip("Survive", cfg.lootMask == survival, cw)) cfg.lootMask = survival, ch = true;
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("food, drink, medical, tools");
         ImGui::PopStyleVar();
+        ImGui::EndDisabled();
         ImGui::Dummy(ImVec2(0, 2));
 
         static const int kOrder[] = {loot::Rare,    loot::Gun,      loot::Ammo, loot::Attachment, loot::Explosive,   loot::Melee, loot::Medical, loot::Food,
-                                     loot::Drink,   loot::Tool,     loot::Bag,  loot::Clothing,   loot::VehiclePart, loot::Base,  loot::Other};
+                                     loot::Drink,   loot::Tool,     loot::Bag,  loot::Clothing,   loot::VehiclePart, loot::Base,
+                                     loot::CoveredVehicle, loot::VehicleKey, loot::Stash, loot::Other};
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 2));
         for (const int c : kOrder) {
             const loot::Info& li = loot::info(c);
             const bool on = loot::shown(cfg.lootMask, c);
+            ImGui::BeginDisabled(!cfg.loot && c != loot::CoveredVehicle);
             const int r = catRow(li.id, c, col32(li.color), li.name, n.cat[c], on, true);
+            ImGui::EndDisabled();
             if (r == 1) cfg.lootMask ^= 1u << c, ch = true;
             else if (r == 2) {
                 const unsigned only = 1u << c;
@@ -1605,7 +1700,6 @@ void drawSettingsBody(Config& cfg, const Counts& n, bool live, const std::vector
         ImGui::PopStyleVar();
         ImGui::TextDisabled("click toggles, right-click or ONLY shows just that");
     }
-    ImGui::EndDisabled();
 
     section("ITEM FILTER");
     ImGui::BeginDisabled(!cfg.loot);
@@ -1714,6 +1808,7 @@ void drawSettingsBody(Config& cfg, const Counts& n, bool live, const std::vector
     catRow("##surv", kGlyphPerson, col32(th::Survivor), "Survivors", n.survivors, true, false, false);
     if (catRow("##inf", kGlyphPerson, col32(th::Infected), "Infected", n.infected, cfg.infected, false)) cfg.infected = !cfg.infected, ch = true;
     if (catRow("##veh", kGlyphCar, col32(th::Vehicle), "Vehicles", n.vehicles, cfg.vehicles, false)) cfg.vehicles = !cfg.vehicles, ch = true;
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Shows ordinary vehicles. Use Vehicles + Covered in Loot to toggle both vehicle types.");
     if (catRow("##ani", kGlyphPaw, col32(th::Animal), "Animals", n.animals, cfg.animals, false)) cfg.animals = !cfg.animals, ch = true;
     ImGui::PopStyleVar();
     onlineCombo(online);
@@ -1726,6 +1821,10 @@ void drawSettingsBody(Config& cfg, const Counts& n, bool live, const std::vector
     ch |= ImGui::SliderFloat("##marker", &cfg.markerScale, 0.5f, 2.5f, "%.1fx");
     ch |= switchRow("Labels", &cfg.names);
     ch |= switchRow("Events", &cfg.events);
+    ch |= switchRow("Corpses", &cfg.corpses);
+    ch |= switchRow("Health (0-100)", &cfg.health);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Requires a current player-health.tsv feed.");
+    if (cfg.health) ImGui::TextDisabled("%s", player_health::statusText(cfg.healthStatus));
     ImGui::BeginDisabled(!cfg.names);
     ImGui::TextDisabled("Label loot within");
     ch |= ImGui::SliderInt("##lootlab", &cfg.lootLabelRange, 25, 2000, "%d m", ImGuiSliderFlags_Logarithmic);
@@ -1802,16 +1901,17 @@ void drawSettingsBody(Config& cfg, const Counts& n, bool live, const std::vector
         constexpr Share shares[]{
             {"Publish current map", webmap::CurrentMap}, {"Own position", webmap::Own},
             {"Own heading", webmap::Heading}, {"Players (positions and friends)", webmap::Players},
-            {"Player names", webmap::PlayerNames}, {"Held items", webmap::PlayerHeld},
+            {"Player names", webmap::PlayerNames}, {"Held items", webmap::PlayerHeld}, {"Player health", webmap::PlayerHealth},
             {"Infected", webmap::Infected}, {"Animals", webmap::Animals},
-            {"Vehicles", webmap::Vehicles}, {"Loot (local filters apply)", webmap::Loot}, {"Events", webmap::Events},
+            {"Loot (local filters apply)", webmap::Loot}, {"Events", webmap::Events}, {"Corpses", webmap::Corpses},
         };
         ImGui::TextUnformatted("Server-side releases");
         for (const auto& share : shares) {
             ImGui::PushID(int(share.bit));
             ImGui::BeginDisabled((share.bit != webmap::CurrentMap && !cfg.webmap.shares(webmap::CurrentMap)) ||
                                  (share.bit == webmap::Heading && !cfg.webmap.shares(webmap::Own)) ||
-                                 ((share.bit == webmap::PlayerNames || share.bit == webmap::PlayerHeld) && !cfg.webmap.shares(webmap::Own) &&
+                                 ((share.bit == webmap::PlayerNames || share.bit == webmap::PlayerHeld ||
+                                   share.bit == webmap::PlayerHealth) && !cfg.webmap.shares(webmap::Own) &&
                                   !cfg.webmap.shares(webmap::Players)));
             bool on = cfg.webmap.shares(share.bit);
             if (switchRow(share.label, &on)) {
@@ -1822,6 +1922,8 @@ void drawSettingsBody(Config& cfg, const Counts& n, bool live, const std::vector
             ImGui::EndDisabled();
             ImGui::PopID();
         }
+        ImGui::TextWrapped("Backpacks, vehicle keys & stashes follow the switch in Loot.");
+        ImGui::TextWrapped("Vehicles and Covered Vehicles follow their radar switches. Vehicles + Covered toggles both.");
         cfg.webmapChanged |= changed;
     }
 

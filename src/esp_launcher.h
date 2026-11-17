@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "crosshair.h"
+#include "loot.h"
 #include "webmap.h"
 
 struct EspSettings {
@@ -31,6 +32,7 @@ struct EspSettings {
     bool dzAnimals = false, dzVehicles = true;
     bool dzLootValuables = false;
     bool dzHeld = true;
+    bool dzEspHealth = false, dzRadarHealth = false;
 #ifndef HIRSCHGANGWARE_NO_DIAG
     std::string dzNameAnchor;
 #endif
@@ -48,9 +50,11 @@ struct EspSettings {
     bool dzInfected = true;
     bool dzRadarNames = true;
     bool dzRadarEvents = false;
+    bool dzRadarCorpses = true;
     int dzRadarLootLabel = 250;
     float dzRadarMarker = 1.0f;
-    unsigned dzLootCats = 0x7FFF;
+    unsigned dzLootCats = loot::kAll;
+    unsigned dzRadarStashLoot = loot::kStashLoot;
     bool dzRadarHeadings = true;
     int dzRadarHeadingLen = 150;
     int dzFilterMode = 0;

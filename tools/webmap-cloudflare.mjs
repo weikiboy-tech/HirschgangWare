@@ -62,7 +62,8 @@ export function createRelay(port, getHostname) {
 
 async function start() {
   const port = Number(process.argv[2] ?? 8765);
-  const publicLink = process.argv[3] === "--public-test";
+  const publicTest = process.argv[3] === "--public-test";
+  const publicLink = publicTest || process.argv[3] === "--public";
   if (!Number.isInteger(port) || port < 1024 || port > 65535) throw Error("Invalid local Webmap port.");
   if (process.argv[3] && !publicLink) throw Error("Unknown tunnel option.");
   const { HIRSCHGANG_TEST_EMAIL, ...env } = process.env;
@@ -92,7 +93,7 @@ async function start() {
   const startup = setTimeout(() => {
     if (!hostname) { console.error("Cloudflare did not create the tunnel."); connector.kill(); }
   }, 45000);
-  const expiry = publicLink ? setTimeout(() => connector.kill(), 30 * 60 * 1000) : null;
+  const expiry = publicTest ? setTimeout(() => connector.kill(), 30 * 60 * 1000) : null;
   let output = "";
   connector.stderr.setEncoding("utf8");
   connector.stderr.on("data", part => {

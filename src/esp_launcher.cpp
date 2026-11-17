@@ -180,9 +180,16 @@ void loadSettings(EspSettings& s) {
     s.dzInfected = readBool("dz_infected", readBool("dz_radar_infected", s.dzInfected));
     s.dzRadarNames = readBool("dz_radar_names", s.dzRadarNames);
     s.dzRadarEvents = readBool("dz_radar_events", s.dzRadarEvents);
+    s.dzRadarCorpses = readBool("dz_radar_corpses", s.dzRadarCorpses);
     s.dzRadarLootLabel = GetPrivateProfileIntA(readSection(), "dz_radar_loot_label", s.dzRadarLootLabel, readIniPath().c_str());
     s.dzRadarMarker = GetPrivateProfileIntA(readSection(), "dz_radar_marker_x100", int(s.dzRadarMarker * 100 + 0.5f), readIniPath().c_str()) / 100.f;
     s.dzLootCats = unsigned(std::strtoul(readString("dz_loot_cats", std::to_string(s.dzLootCats)).c_str(), nullptr, 10));
+    const auto lootCategoryCount = GetPrivateProfileIntA(readSection(), "dz_loot_category_count", 0, readIniPath().c_str());
+    if (lootCategoryCount <= loot::CoveredVehicle) {
+        if (s.dzLootCats == 0x7FFF) s.dzLootCats = loot::kAll;
+        if (loot::shown(s.dzLootCats, loot::Other)) s.dzLootCats |= 1u << loot::CoveredVehicle;
+    }
+    s.dzRadarStashLoot = GetPrivateProfileIntA(readSection(), "dz_radar_stash_loot", s.dzRadarStashLoot, readIniPath().c_str()) & loot::kStashLoot;
     s.dzRadarHeadings = readBool("dz_radar_headings", s.dzRadarHeadings);
     s.dzRadarHeadingLen = GetPrivateProfileIntA(readSection(), "dz_radar_heading_len", s.dzRadarHeadingLen, readIniPath().c_str());
     s.dzFilterMode = GetPrivateProfileIntA(readSection(), "dz_filter_mode", s.dzFilterMode, readIniPath().c_str());
@@ -190,6 +197,8 @@ void loadSettings(EspSettings& s) {
     s.box = readBool("box", s.box);
     s.names = readBool("names", s.names);
     s.info = readBool("info", s.info);
+    s.dzEspHealth = readBool("dz_esp_health", s.dzEspHealth);
+    s.dzRadarHealth = readBool("dz_radar_health", s.dzRadarHealth);
     s.crosshair = readBool("crosshair", s.crosshair);
     s.webmap.enabled = readBool("webmap_enabled", s.webmap.enabled);
     s.webmap.port = std::clamp(int(GetPrivateProfileIntA(readSection(), "webmap_port", s.webmap.port, readIniPath().c_str())), 1024, 65535);
@@ -242,9 +251,12 @@ void saveSettings(const EspSettings& s) {
     writeBool("dz_infected", s.dzInfected);
     writeBool("dz_radar_names", s.dzRadarNames);
     writeBool("dz_radar_events", s.dzRadarEvents);
+    writeBool("dz_radar_corpses", s.dzRadarCorpses);
     writeString("dz_radar_loot_label", std::to_string(s.dzRadarLootLabel));
     writeString("dz_radar_marker_x100", std::to_string(int(s.dzRadarMarker * 100 + 0.5f)));
     writeString("dz_loot_cats", std::to_string(s.dzLootCats));
+    writeString("dz_loot_category_count", std::to_string(loot::Count));
+    writeString("dz_radar_stash_loot", std::to_string(s.dzRadarStashLoot));
     writeBool("dz_radar_headings", s.dzRadarHeadings);
     writeString("dz_radar_heading_len", std::to_string(s.dzRadarHeadingLen));
     writeString("dz_filter_mode", std::to_string(s.dzFilterMode));
@@ -257,6 +269,8 @@ void saveSettings(const EspSettings& s) {
     writeString("webmap_hz", std::to_string(s.webmap.hz));
     writeString("webmap_release", std::to_string(s.webmap.release));
     writeString("webmap_public_host", s.webmap.publicHost);
+    writeBool("dz_esp_health", s.dzEspHealth);
+    writeBool("dz_radar_health", s.dzRadarHealth);
     writeBool("crosshair", s.crosshair);
     writeString("crosshair_size", std::to_string(s.crosshairSize));
     writeString("crosshair_style", std::to_string(int(s.crosshairStyle)));

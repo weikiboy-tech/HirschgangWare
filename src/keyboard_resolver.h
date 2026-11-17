@@ -4,6 +4,7 @@
 #include <vmmdll.h>
 
 #include <cstdio>
+#include <algorithm>
 #include <cstring>
 #include <stdexcept>
 #include <string>
@@ -65,7 +66,7 @@ T field(const uint8_t* bytes) {
     return value;
 }
 
-inline void scan(const Reader& vmm, DWORD pid, const char* module, std::vector<Pattern>& patterns) {
+inline unsigned scan(const Reader& vmm, DWORD pid, DWORD alternate, const char* module, std::vector<Pattern>& patterns) {
     const uint64_t base = vmm.module(vmm.handle, pid, module);
     uint8_t header[4096]{};
     if (!base || !vmm.exact(pid, base, header)) throw std::runtime_error("Module PE header unavailable.");
@@ -82,6 +83,8 @@ inline void scan(const Reader& vmm, DWORD pid, const char* module, std::vector<P
     if (table > sizeof header || nt.FileHeader.NumberOfSections > (sizeof header - table) / sizeof(IMAGE_SECTION_HEADER))
         throw std::runtime_error("Invalid section table.");
     bool scanned = false;
+    unsigned missingPages = 0;
+    const bool sameModule = alternate && vmm.module(vmm.handle, alternate, module) == base;
     for (WORD i = 0; i < nt.FileHeader.NumberOfSections; ++i) {
         const auto section = field<IMAGE_SECTION_HEADER>(header + table + i * sizeof(IMAGE_SECTION_HEADER));
         if (!(section.Characteristics & IMAGE_SCN_MEM_EXECUTE) || !section.Misc.VirtualSize) continue;
@@ -90,11 +93,21 @@ inline void scan(const Reader& vmm, DWORD pid, const char* module, std::vector<P
             throw std::runtime_error("Invalid executable section.");
         const uint64_t code = base + section.VirtualAddress;
         std::vector<uint8_t> bytes(size);
-        if (!vmm.exact(pid, code, bytes.data(), size))
-            throw std::runtime_error("Executable section incomplete; signature counts would be misleading.");
+        constexpr DWORD pageSize = 4096;
+        std::vector<bool> readable((size + pageSize - 1) / pageSize, true);
+        if (!vmm.exact(pid, code, bytes.data(), size)) {
+            for (DWORD offset = 0; offset < size; offset += pageSize) {
+                const DWORD length = std::min(pageSize, size - offset);
+                const bool ok = vmm.exact(pid, code + offset, bytes.data() + offset, length) ||
+                    (sameModule && vmm.exact(alternate, code + offset, bytes.data() + offset, length));
+                readable[offset / pageSize] = ok;
+                if (!ok) ++missingPages;
+            }
+        }
         scanned = true;
         for (auto& pattern : patterns) {
             for (size_t at = 0; at + pattern.bytes.size() <= bytes.size(); ++at) {
+                if (!readable[at / pageSize] || !readable[(at + pattern.bytes.size() - 1) / pageSize]) continue;
                 size_t j = 0;
                 for (; j < pattern.bytes.size(); ++j) {
                     const int b = pattern.bytes[j];
@@ -109,7 +122,7 @@ inline void scan(const Reader& vmm, DWORD pid, const char* module, std::vector<P
         }
     }
     if (!scanned) throw std::runtime_error("No executable section found.");
-
+    return missingPages;
 }
 
 inline bool kernelAddress(uint64_t address) { return address >= 0xffff800000000000ull; }
@@ -152,7 +165,8 @@ inline void printMatches(const char* module, const std::vector<Pattern>& pattern
     }
 }
 
-inline Address resolve(const Reader& vmm, DWORD session, bool diagnostics = false) {
+inline Address resolve(const Reader& vmm, DWORD session, bool diagnostics = false,
+                       bool allowPartial = false, bool* usedPartial = nullptr) {
     const auto [csrss, winlogon] = proxies(vmm, session);
     const DWORD pid = csrss | kKernel;
     if (diagnostics) std::printf("Session %lu: csrss=%lu winlogon=%lu\n", session, csrss, winlogon);
@@ -168,12 +182,16 @@ inline Address resolve(const Reader& vmm, DWORD session, bool diagnostics = fals
         {"memflow offset A", {0xb9,0x00,0x80,0xff,0xff,x,0x22,0xb4,x,x,x,x,x,0x41}, 9, false, {}},
         {"memflow offset B", {0x40,0x0f,0xb6,x,0x48,0xc1,0xe9,0x02,0x8a,0x94,0x08,x,x,x,x}, 11, false, {}},
     };
-    scan(vmm, pid, "win32k.sys", slots);
-    scan(vmm, pid, "win32kbase.sys", offsets);
+    const DWORD reader = winlogon | kKernel;
+    const unsigned missing = scan(vmm, pid, reader, "win32k.sys", slots) +
+                             scan(vmm, pid, reader, "win32kbase.sys", offsets);
+    if (usedPartial) *usedPartial = missing != 0;
     if (diagnostics) {
+        std::printf("Unread executable pages: %u\n", missing);
         printMatches("win32k.sys", slots);
         printMatches("win32kbase.sys", offsets);
     }
+    if (missing && !allowPartial) throw std::runtime_error("Executable sections contain unreadable pages.");
     const auto& global = slots.back().targets;
     const auto& mambo = offsets.front().targets;
     const auto& first = offsets[1].targets;
@@ -181,7 +199,6 @@ inline Address resolve(const Reader& vmm, DWORD session, bool diagnostics = fals
     if (global.size() != 1 || mambo.size() != 1 || first.size() + second.size() != 1 ||
         mambo.front() != (first.empty() ? second.front() : first.front()))
         throw std::runtime_error("No unique, corroborated candidate.");
-    const DWORD reader = winlogon | kKernel;
     uint64_t table = 0, slot = 0, state = 0;
     // memflow's slot-zero chain is a hypothesis to test, even when readable.
     if (!vmm.exact(pid, global.front(), table) || !kernelAddress(table) ||

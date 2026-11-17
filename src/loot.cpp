@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cstdio>
 #include <mutex>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -26,6 +27,9 @@ const Info kInfo[Count] = {
     {"Vehicle parts", "vehicle", RGB(175, 115, 255)},
     {"Base building", "base", RGB(70, 215, 175)},
     {"Rare", "rare", RGB(255, 215, 0)},
+    {"Hidden stashes", "stash", RGB(110, 220, 172)},
+    {"Vehicle keys", "vehiclekey", RGB(255, 210, 100)},
+    {"Covered Vehicles", "coveredvehicle", RGB(137, 220, 190)},
 };
 
 std::string lower(std::string s) {
@@ -42,6 +46,31 @@ bool matches(const std::string& n, const char* pat) {
     if (pat[0] == '=') return n == pat + 1;
     if (pat[0] == '^') return n.rfind(pat + 1, 0) == 0;
     return n.find(pat) != std::string::npos;
+}
+
+bool coveredVehicle(std::string_view name) {
+    constexpr std::string_view suffix = "_cover";
+    if (name.size() <= suffix.size() || name.substr(name.size() - suffix.size()) != suffix) return false;
+    name.remove_suffix(suffix.size());
+    bool vehicle = false;
+    while (!name.empty()) {
+        const auto end = name.find('_');
+        auto token = name.substr(0, end);
+        if (token.substr(0, 9) == "expansion") token.remove_prefix(9);
+        if (token == "wheel" || token == "tire" || token == "tyre" || token == "door" || token == "doors" ||
+            token == "hood" || token == "trunk" || token == "engine" || token == "battery" ||
+            token == "seat" || token == "seatcover" || token == "windshield" || token == "parts") return false;
+        vehicle |= token == "motorbike" || token == "motorcycle" || token == "dirtbike" || token == "scooter" ||
+                   token == "moped" || token == "quadbike" || token == "quad" || token == "atv" || token == "utv" ||
+                   token == "car" || token == "offroad" || token == "offroadhatchback" || token == "hatchback" ||
+                   token == "sedan" || token == "civiliansedan" || token == "suv" || token == "truck" ||
+                   token == "bus" || token == "minibus" || token == "van" || token == "pickup" ||
+                   token == "humvee" || token == "uaz" || token == "lada" || token == "landrover" ||
+                   token == "vodnik" || token == "tractor" || token == "m3s";
+        if (end == std::string_view::npos) break;
+        name.remove_prefix(end + 1);
+    }
+    return vehicle;
 }
 
 const Rule kRules[] = {
@@ -115,8 +144,19 @@ int classify(int engineCat, const std::string& name) {
     const std::string n = lower(name);
     for (const auto& [cat, pat] : gOverride)
         if (matches(n, pat.c_str())) return cat;
+    if (coveredVehicle(n)) return CoveredVehicle;
     if (engineCat == Gun) return Gun;
     if (engineCat == Ammo || n.rfind("ammo_", 0) == 0 || n.rfind("mag_", 0) == 0) return Ammo;
+    if (n == "undergroundstash" || n == "hiddenstash" || n.rfind("undergroundstash_", 0) == 0) return Stash;
+    if (n == "expansioncaradminkey" || n.rfind("expansioncarkey", 0) == 0 ||
+        n == "vehiclekey" || n.rfind("vehiclekey_", 0) == 0 ||
+        n == "carkey" || n.rfind("carkey_", 0) == 0) return VehicleKey;
+    if (n.find("backpack") != std::string::npos || n.rfind("mountainbag_", 0) == 0 ||
+        n.rfind("huntingbag_", 0) == 0 || n.rfind("assaultbag_", 0) == 0 ||
+        n.rfind("tortillabag_", 0) == 0 || n.rfind("courierbag", 0) == 0 ||
+        n.rfind("improvisedbag", 0) == 0 || n.rfind("alicebag_", 0) == 0 ||
+        n.rfind("drybag_", 0) == 0 || n.rfind("childbag_", 0) == 0 ||
+        n.rfind("taloonbag_", 0) == 0 || n.rfind("smershbag", 0) == 0) return Bag;
     if (engineCat == Clothing)
         return (n.find("bag") != std::string::npos || n.find("backpack") != std::string::npos || n.find("sack") != std::string::npos)
                    ? Bag

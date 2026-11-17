@@ -74,6 +74,8 @@
     <ClInclude Include="src\keyboard_resolver.h" />
     <ClInclude Include="src\radar.h" />
     <ClInclude Include="src\radar_events.h" />
+    <ClInclude Include="src\radar_corpses.h" />
+    <ClInclude Include="src\player_health.h" />
     <ClInclude Include="src\crosshair.h" />
     <ClInclude Include="src\dayz_camera.h" />
     <ClInclude Include="src\webmap.h" />

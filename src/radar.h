@@ -8,8 +8,10 @@
 #include <vector>
 
 #include "loot.h"
+#include "radar_corpses.h"
 #include "radar_events.h"
 #include "crosshair.h"
+#include "player_health.h"
 #include "webmap.h"
 
 namespace radar {
@@ -27,8 +29,10 @@ struct Dot {
     std::string label;
     std::string name;  // clean player name (survivors only) for friend toggling
     std::string held;
+    int health = player_health::unknown;
     uint32_t webTrackId = 0;
     bool webFriend = false;
+    bool webStashLoot = false;
 };
 
 struct Place {
@@ -50,10 +54,12 @@ struct Frame {
     float fwdX = 0, fwdZ = 0;
     std::string meName;
     std::string meHeld;
+    int meHealth = player_health::unknown;
     std::string mapBase;
     float mapSize = 15360;
     std::vector<Dot> dots;
     std::shared_ptr<const std::vector<radar_event::Marker>> events;
+    std::shared_ptr<const radar_corpse::Markers> corpses;
     std::vector<Place> places;
     std::vector<Online> online;
 };
@@ -61,12 +67,16 @@ struct Frame {
 struct Config {
     bool loot = true;
     unsigned lootMask = ::loot::kAll;
+    unsigned stashLootMask = ::loot::kStashLoot;
     ::loot::Filter filter;
     bool animals = true;
     bool vehicles = true;
     bool infected = true;
     bool names = true;
     bool events = false;
+    bool corpses = true;
+    bool health = false;
+    player_health::Status healthStatus = player_health::Status::Off;
     bool headings = true;
     int headingLen = 150;
     int lootLabelRange = 250;
@@ -94,6 +104,7 @@ struct Config {
         bool skeleton = true, box = false, names = true, distance = true;
         bool fps = true, uncapped = true;
         bool held = true;
+        bool health = false;
         bool valuables = false;
         bool minimap = false;
         int minimapSize = 200;

@@ -3,7 +3,12 @@ import { readFileSync } from "node:fs";
 const source = file => "data:text/javascript;base64," +
   readFileSync(new URL(file, import.meta.url)).toString("base64");
 const { Camera, imageToWorld, screenPoint, shortestTurn, headingOnMap, worldPoint, worldToImage } = await import(source("../web/map.js"));
-const { decode, LiveConnection } = await import(source("../web/live.js"));
+const { CorpseVisibility, decode, healthLine, LiveConnection } = await import(source("../web/live.js"));
+
+assert.equal(healthLine({health: 0}, true), "HP 0");
+assert.equal(healthLine({health: 100}, true), "HP 100");
+assert.equal(healthLine({health: 75}, false), "");
+for (const health of [undefined, 101, -1, "75", null, 0.5]) assert.equal(healthLine({health}, true), "");
 
 const near = (a,b) => assert.ok(Math.abs(a-b) < 1e-7, a + " differs from " + b);
 for (const [size,w,h] of [[15360,8192,8192],[12800,1024,2048],[8192,400,300]]) {
@@ -67,6 +72,16 @@ assert.equal(c.follow,true);
 
 const valid=JSON.stringify({v:1,live:true,map:"chernarusplus",me:{x:1,z:2,heading:-179},layers:{loot:[{x:3,z:4,category:2}]}});
 assert.equal(decode(valid).me.heading,-179);
+const stashPacket = JSON.parse(valid);
+stashPacket.layers = {stashLoot: [
+  {x:450,z:960,kind:"backpack",label:"HuntingBag_Autumn"},
+  {x:560,z:960,kind:"vehicle-key",label:"ExpansionCarKey_Red"},
+  {x:670,z:960,kind:"stash",label:"UndergroundStash"},
+]};
+assert.deepEqual(decode(JSON.stringify(stashPacket)).layers.stashLoot,
+  stashPacket.layers.stashLoot.map(({x, z, kind}) => ({x, z, kind})));
+stashPacket.layers.stashLoot.push({x:720,z:960,kind:"tool",label:"Hammer"});
+assert.equal(decode(JSON.stringify(stashPacket)), null);
 const { playerLines, trackingTargets } = await import(source("../web/live.js"));
 const playerPacket = JSON.parse(valid);
 const firstId = "fedcba9876543210-42", secondId = "fedcba9876543210-43";
@@ -75,6 +90,25 @@ playerPacket.layers.events = [{x:7,z:8,kind:"airdrop",label:"Airdrop"}];
 const decoded = decode(JSON.stringify(playerPacket));
 const visible = trackingTargets(decoded, true);
 assert.deepEqual(decoded.layers.events, playerPacket.layers.events);
+const corpse = { x: 7, z: 8, id: "0123456789abcdef-7", ttlMs: 420000 };
+const deathPacket = {...playerPacket, layers: {corpses: [corpse]}};
+assert.deepEqual(decode(JSON.stringify(deathPacket)).layers.corpses, [corpse]);
+for (const ttlMs of [0, -1, 420001, 1.5]) {
+  assert.equal(decode(JSON.stringify({...deathPacket, layers: {corpses: [{...corpse, ttlMs}]}})), null);
+}
+assert.equal(decode(JSON.stringify({...deathPacket, layers: {corpses: [corpse, corpse]}})), null);
+const corpseView = new CorpseVisibility();
+corpseView.update([corpse], 1000);
+corpseView.update([{...corpse, ttlMs: 419500}], 1610); // Delayed delivery may not extend the clock.
+assert.equal(corpseView.visible(corpse, 420999), true);
+assert.equal(corpseView.visible(corpse, 421000), false);
+assert.equal(corpseView.click(corpse.id, 2000), false);
+assert.equal(corpseView.click("0123456789abcdef-8", 2100), false);
+assert.equal(corpseView.click(corpse.id, 2200), false);
+assert.equal(corpseView.click(corpse.id, 2300), true);
+corpseView.update([{...corpse, ttlMs: 418600}], 2400);
+assert.equal(corpseView.visible(corpse, 2400), false);
+assert.equal(new CorpseVisibility([...corpseView.hidden]).hidden.has(corpse.id), true);
 assert.deepEqual(playerLines(visible.get(firstId), decoded.me), ["Freund  3m", "Rifle"]);
 assert.deepEqual(playerLines(visible.get(firstId), null), ["Freund", "Rifle"]);
 assert.deepEqual(playerLines(visible.get(firstId), decoded.me, {playerNames:false}), ["Rifle"]);

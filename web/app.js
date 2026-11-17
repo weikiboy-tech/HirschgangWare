@@ -1,18 +1,23 @@
 import { Camera, clamp, headingOnMap, radians, screenPoint, worldPoint } from "./map.js";
-import { LiveConnection, layers, playerLines, trackingTargets, validPlayerId } from "./live.js";
+import { CorpseVisibility, LiveConnection, healthLine, layers, playerLines, trackingTargets, validPlayerId } from "./live.js";
 
 const $ = id => document.getElementById(id);
 const canvas = $("canvas"), ctx = canvas.getContext("2d");
 const defaults = { follow: false, rotate: false, smooth: true, duration: 120, places: true, labels: true,
-  playerNames: true, heldItems: true,
+  playerNames: true, heldItems: true, health: false,
   grid: false, waypoints: true, markerSize: 7, autoMap: true, sidebar: null, map: "", filters: {}, points: [] };
 const storageKey = "hirschgangware.webmap.v1";
 const targetKey = storageKey + ".target";
+const corpseKey = storageKey + ".hidden-corpses";
+let hiddenCorpses;
+try { hiddenCorpses = JSON.parse(sessionStorage.getItem(corpseKey)); } catch { /* Storage may be disabled. */ }
+const corpses = new CorpseVisibility(hiddenCorpses);
+let corpseTimer;
 function savedSettings() {
   try { return JSON.parse(localStorage.getItem(storageKey)) ?? {}; } catch { return {}; }
 }
 const stored = savedSettings(), prefs = { ...defaults };
-for (const key of ["follow", "rotate", "smooth", "places", "labels", "playerNames", "heldItems", "grid", "waypoints", "autoMap", "sidebar"]) {
+for (const key of ["follow", "rotate", "smooth", "places", "labels", "playerNames", "heldItems", "health", "grid", "waypoints", "autoMap", "sidebar"]) {
   if (typeof stored[key] === "boolean") prefs[key] = stored[key];
 }
 if (Number.isFinite(stored.duration)) prefs.duration = clamp(stored.duration, 40, 600);
@@ -40,8 +45,18 @@ camera.rotate = prefs.rotate;
 camera.smooth = prefs.smooth;
 camera.milliseconds = prefs.duration;
 
-const layerNames = { players: "Spieler", infected: "Infizierte", animals: "Tiere", vehicles: "Fahrzeuge", loot: "Beute", events: "Events" };
-const colors = { players: "#fb8d9d", infected: "#faaf67", animals: "#d5b1fc", vehicles: "#a8c8fe", loot: "#e7d28c" };
+const layerNames = { players: "Spieler", infected: "Infizierte", animals: "Tiere", loot: "Beute", events: "Events" };
+const colors = { players: "#fb8d9d", infected: "#faaf67", animals: "#d5b1fc", loot: "#e7d28c" };
+const stashLootIcons = {
+  backpack: { color: "#e0a377", path: new Path2D(
+    "M -3 -4 V -6 Q -3 -8 0 -8 Q 3 -8 3 -6 V -4 M -6 -1 Q -6 -5 0 -5 Q 6 -5 6 -1 V 5 Q 6 7 4 7 H -4 Q -6 7 -6 5 Z M -3 1 H 3 V 4 H -3 Z") },
+  "vehicle-key": { color: "#ffd264", path: new Path2D(
+    "M 0 -2 A 4 4 0 1 1 -8 -2 A 4 4 0 1 1 0 -2 Z M -1 1 L 6 7 M 3 4 L 6 1 M 5 6 L 8 3") },
+  stash: { color: "#6edcac", path: new Path2D(
+    "M -7 -4 H 7 V 6 H -7 Z M -7 0 H 7 M -2 0 V 3 H 2 V 0 M -5 -4 L -3 -7 H 3 L 5 -4") },
+};
+const vehicleIcon = { color: "#a8c8fe", path: new Path2D(
+  "M -8 4 V 0 L -5 -5 H 5 L 8 0 V 4 Z M -8 0 H 8 M -6 4 V 6 M 6 4 V 6 M -5 2 H -4 M 4 2 H 5") };
 const friendColor = "#3cff8c";
 const trackingOrder = new Intl.Collator("de", { numeric: true });
 const matchLive = () => live && selected && live.map === selected.id;
@@ -122,7 +137,7 @@ function label(name, x, y, color = "#ecf3f3", declutter = false) {
   ctx.fillText(name, x, y);
 }
 
-function marker(p, radius, color, name, tracked = false) {
+function marker(p, radius, color, name, tracked = false, health = "") {
   const s = screenPoint(p, camera, width, height);
   if (s.x < -60 || s.y < -60 || s.x > width + 60 || s.y > height + 60) return;
   const direction = Number.isFinite(p.heading) ? radians(headingOnMap(p.heading, camera.angle)) : null;
@@ -149,12 +164,31 @@ function marker(p, radius, color, name, tracked = false) {
   ctx.beginPath();
   ctx.arc(0, 0, radius, 0, Math.PI * 2);
   ctx.fill(); ctx.stroke(); ctx.restore();
-  if (name && prefs.labels) {
+  const lines = name && prefs.labels ? (Array.isArray(name) ? [...name] : [name]) : [];
+  if (health) lines.push(health);
+  if (lines.length) {
     const below = direction !== null && Math.cos(direction) > 0;
-    const lines = Array.isArray(name) ? name : [name];
     const y = s.y + (below ? radius + 15 : -radius - 5 - (lines.length - 1) * 14);
     lines.forEach((line, index) => label(line, s.x, y + index * 14, color));
   }
+}
+
+function outlineMarker(item, { color, path }) {
+  const p = screenPoint(item, camera, width, height);
+  const scale = clamp(prefs.markerSize / 7, .8, 1.5);
+  const margin = 10 * scale;
+  if (p.x < -margin || p.y < -margin || p.x > width + margin || p.y > height + margin) return;
+  ctx.save();
+  ctx.translate(p.x, p.y);
+  ctx.scale(scale, scale);
+  ctx.lineJoin = ctx.lineCap = "round";
+  ctx.strokeStyle = "#09141b";
+  ctx.lineWidth = 4;
+  ctx.stroke(path);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.8;
+  ctx.stroke(path);
+  ctx.restore();
 }
 
 function eventMarker(event) {
@@ -174,6 +208,36 @@ function eventMarker(event) {
   ctx.fill();
   ctx.stroke();
   if (prefs.labels) label(event.label, p.x, p.y - r - 5, color);
+}
+
+function visibleCorpses(now) {
+  if (!matchLive() || prefs.filters.corpses === false) return [];
+  return (live.layers.corpses ?? []).filter(corpse => corpses.visible(corpse, now));
+}
+
+function corpseMarker(corpse) {
+  const {x, y} = screenPoint(corpse, camera, width, height);
+  if (x < -8 || x > width + 8 || y < -8 || y > height + 8) return;
+  const circle = (cx, cy, radius) => {
+    ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI * 2); ctx.fill();
+  };
+  ctx.fillStyle = "#09141b";
+  circle(x, y, 8);
+  ctx.fillStyle = "#faf0d6";
+  circle(x, y - 1, 5.3);
+  ctx.fillRect(x - 3, y + 1, 6, 4);
+  ctx.fillStyle = "#09141b";
+  circle(x - 2, y - 1, 1.3);
+  circle(x + 2, y - 1, 1.3);
+  ctx.fillRect(x - .5, y + 2, 1, 2);
+}
+
+function scheduleCorpseExpiry() {
+  clearTimeout(corpseTimer);
+  const now = performance.now();
+  let next = Infinity;
+  for (const deadline of corpses.deadlines.values()) if (deadline > now) next = Math.min(next, deadline);
+  if (Number.isFinite(next)) corpseTimer = setTimeout(() => { redraw(); scheduleCorpseExpiry(); }, Math.ceil(next - now));
 }
 
 function compass() {
@@ -215,17 +279,20 @@ function draw(now) {
     if (prefs.waypoints) for (const p of pointsOnMap()) marker(p, 5, "#f7d466", p.name);
     if (matchLive()) {
       for (const [id, dots] of Object.entries(live.layers)) {
-        if (id === "events" || prefs.filters[id] === false) continue;
+        if (!colors[id] || prefs.filters[id] === false) continue;
         const radius = prefs.markerSize * .65;
         for (const p of dots) {
           const tracked = !!p.id && p.id === trackedMarkerId;
           marker(tracked ? camera.marker : p, radius, p.friend ? friendColor : colors[id],
-            id === "players" ? playerLines(p, live.me, prefs) : layerNames[id], tracked);
+            id === "players" ? playerLines(p, live.me, prefs) : layerNames[id], tracked, healthLine(p, prefs.health));
         }
       }
       if (live.me) marker(trackedMarkerId === "own" ? camera.marker : live.me, prefs.markerSize, "#65f1d3",
-        playerLines(live.me, null, prefs));
+        playerLines(live.me, null, prefs), false, healthLine(live.me, prefs.health));
+      if (prefs.filters.vehicles !== false) for (const item of live.layers.vehicles ?? []) outlineMarker(item, vehicleIcon);
+      if (prefs.filters.stashLoot !== false) for (const item of live.layers.stashLoot ?? []) outlineMarker(item, stashLootIcons[item.kind]);
       if (prefs.filters.events !== false) for (const event of live.layers.events ?? []) eventMarker(event);
+      for (const corpse of visibleCorpses(performance.now())) corpseMarker(corpse);
     }
     if (width > 130 && height > 180) compass();
   }
@@ -394,15 +461,43 @@ function catalog(force = false) {
 
 function updateLayers() {
   const held = $("held-status");
-  const hasPlayers = live?.me || live?.layers.players;
-  const missing = live?.heldShared === false;
+  const hasMap = !!(live?.live && live.map);
+  const hasPlayers = !!(live?.me || live?.layers.players);
   const legacy = hasPlayers && live.heldShared === undefined &&
     !live.me?.held && !live.layers.players?.some(player => player.held);
-  held.hidden = !(prefs.labels && prefs.heldItems && hasPlayers && (missing || legacy));
-  held.textContent = held.hidden ? "" : missing
-    ? "Waffenanzeige: Am Host unter Map → Webmap „Held items“ freigeben."
-    : "Falls Waffen fehlen: Am Host unter Map → Webmap „Held items“ prüfen.";
-  const box = $("released"), list = Object.keys(live?.layers ?? {});
+  let heldMessage = "";
+  if (hasMap && live.heldShared === false)
+    heldMessage = "Am Host unter Map → Webmap „Held items“ und eine Spielerebene freigeben.";
+  else if (hasMap && legacy)
+    heldMessage = "Falls Waffen fehlen: Am Host unter Map → Webmap „Held items“ prüfen.";
+  else if (hasMap && prefs.heldItems && !prefs.labels)
+    heldMessage = "Waffen werden angezeigt, wenn Beschriftungen aktiv sind.";
+  held.textContent = heldMessage;
+  held.hidden = !heldMessage;
+
+  const healthStatus = $("health-status");
+  const haveHealth = live?.me?.health !== undefined || live?.layers.players?.some(p => p.health !== undefined);
+  healthStatus.hidden = !hasMap || !prefs.health || !!haveHealth;
+  healthStatus.textContent = healthStatus.hidden ? "" : live.healthShared === false
+    ? "Am Host unter Map → Webmap „Player health“ und eine Spielerebene freigeben."
+    : "Der Host hat noch keine aktuellen HP für die sichtbaren Spieler.";
+  const corpseStatus = $("corpse-status");
+  const corpseMessage = hasMap && !live.layers.corpses
+    ? "Am Host unter Map → Webmap „Corpses“ freigeben."
+    : "";
+  corpseStatus.textContent = corpseMessage;
+  corpseStatus.hidden = !corpseMessage;
+  const stashStatus = $("stash-loot-status");
+  const stashItems = live?.layers.stashLoot;
+  const stashMessage = !hasMap || prefs.filters.stashLoot === false ? "" : stashItems === undefined
+    ? "Am Host unter Loot „Backpacks, vehicle keys & stashes“ einschalten."
+    : matchLive() && !stashItems.length ? "Aktuell sind keine Objekte dieser Ebene erfasst." : "";
+  stashStatus.hidden = !stashMessage;
+  stashStatus.textContent = stashMessage;
+  const vehicleStatus = $("vehicle-status");
+  vehicleStatus.hidden = !hasMap || prefs.filters.vehicles === false || !!live.layers.vehicles;
+  vehicleStatus.textContent = vehicleStatus.hidden ? "" : "Am Host unter Loot „Vehicles + Covered“ einschalten.";
+  const box = $("released"), list = Object.keys(live?.layers ?? {}).filter(id => Object.hasOwn(layerNames, id));
   const stamp = list.join(",");
   if (box.dataset.layers === stamp) return;
   box.dataset.layers = stamp;
@@ -431,6 +526,8 @@ function connectionState(state, reason) {
   if (state === "online" && changed) catalog(true);
   if (state !== "online" && changed) {
     live = null; lastPacket = "";
+    corpses.firstClick = null;
+    clearTimeout(corpseTimer);
     syncTracking(); updateLayers(); redraw();
   }
 }
@@ -440,7 +537,10 @@ function packet(update) {
   const stamp = JSON.stringify(update);
   if (stamp === lastPacket) return;
   lastPacket = stamp;
+  if (live?.map !== update.map) corpses.firstClick = null;
   live = update;
+  corpses.update(update.layers.corpses ?? [], performance.now());
+  scheduleCorpseExpiry();
   if (prefs.autoMap && update.map && update.map !== selected?.id) {
     if (maps.some(m => m.id === update.map)) setMap(update.map);
     else catalog();
@@ -490,11 +590,12 @@ $("add-waypoint").onclick = () => {
 
 for (const [id, key] of Object.entries({
   "auto-map": "autoMap", follow: "follow", rotate: "rotate", smooth: "smooth", places: "places",
-  labels: "labels", "player-names": "playerNames", "held-items": "heldItems", grid: "grid", waypoints: "waypoints"
+  labels: "labels", "player-names": "playerNames", "held-items": "heldItems", health: "health", grid: "grid", waypoints: "waypoints"
 })) {
   $(id).checked = prefs[key];
   $(id).onchange = () => {
     prefs[key] = $(id).checked;
+    if (key === "heldItems" && prefs.heldItems) $("labels").checked = prefs.labels = true;
     if (key === "follow") camera.setFollow(prefs.follow);
     if (key === "rotate") camera.rotate = prefs.rotate;
     if (key === "smooth") camera.smooth = prefs.smooth;
@@ -505,6 +606,22 @@ for (const [id, key] of Object.entries({
     syncTracking(); updateLayers(); save(); redraw();
   };
 }
+$("corpse-layer").checked = prefs.filters.corpses !== false;
+$("corpse-layer").onchange = () => {
+  prefs.filters.corpses = $("corpse-layer").checked;
+  corpses.firstClick = null;
+  save(); redraw();
+};
+$("stash-loot-layer").checked = prefs.filters.stashLoot !== false;
+$("stash-loot-layer").onchange = () => {
+  prefs.filters.stashLoot = $("stash-loot-layer").checked;
+  updateLayers(); save(); redraw();
+};
+$("vehicle-layer").checked = prefs.filters.vehicles !== false;
+$("vehicle-layer").onchange = () => {
+  prefs.filters.vehicles = $("vehicle-layer").checked;
+  updateLayers(); save(); redraw();
+};
 $("duration").value = prefs.duration;
 $("duration-value").textContent = prefs.duration + " ms";
 $("duration").oninput = () => {
@@ -560,6 +677,22 @@ canvas.addEventListener("pointermove", e => {
 
 function clickAt(p) {
   if (!selected) return;
+  const now = performance.now();
+  if (!adding) {
+    let hit = null, distance = 11;
+    for (const corpse of visibleCorpses(now)) {
+      const s = screenPoint(corpse, camera, width, height);
+      const gap = Math.hypot(s.x - p.x, s.y - p.y);
+      if (gap < distance) { hit = corpse; distance = gap; }
+    }
+    if (corpses.click(hit?.id, now)) {
+      try { sessionStorage.setItem(corpseKey, JSON.stringify([...corpses.hidden])); } catch { /* Storage may be disabled. */ }
+      redraw();
+    }
+    if (hit) return;
+  } else {
+    corpses.click(null, now);
+  }
   if (adding) {
     const pos = worldPoint(p, camera, width, height);
     if (pos.x < 0 || pos.z < 0 || pos.x > selected.size || pos.z > selected.size) return;
@@ -586,6 +719,7 @@ function clickAt(p) {
 function endPointer(e) {
   if (!pointers.delete(e.pointerId)) return;
   if (!pointers.size && drag && !drag.moved && e.type === "pointerup") clickAt(eventPoint(e));
+  else corpses.firstClick = null;
   pinch = null; drag = null; canvas.classList.remove("dragging");
 }
 canvas.addEventListener("pointerup", endPointer);

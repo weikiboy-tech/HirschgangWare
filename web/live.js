@@ -1,4 +1,6 @@
-export const layers = ["players", "infected", "animals", "vehicles", "loot", "events"];
+export const layers = ["players", "infected", "animals", "vehicles", "loot", "events", "corpses", "stashLoot"];
+const stashLootKinds = ["backpack", "vehicle-key", "stash"];
+const corpseLifetime = 7 * 60 * 1000;
 const eventKinds = ["airdrop", "helicopter-crash", "loot-cluster"];
 const validId = id => typeof id === "string" && /^[a-z0-9_-]{1,48}$/.test(id);
 const validPoint = p => p && Number.isFinite(p.x) && Number.isFinite(p.z) &&
@@ -6,7 +8,10 @@ const validPoint = p => p && Number.isFinite(p.x) && Number.isFinite(p.z) &&
 
 const validHeading = value => value === undefined || (Number.isFinite(value) && Math.abs(value) <= 360);
 export const validPlayerId = id => typeof id === "string" && /^[0-9a-f]{16}-[1-9][0-9]{0,9}$/.test(id);
+const validHealth = value => Number.isInteger(value) && value >= 0 && value <= 100;
 const shortText = value => typeof value === "string" && value.length > 0 && value.length <= 80 ? value : undefined;
+
+export const healthLine = (player, enabled) => enabled && validHealth(player.health) ? "HP " + player.health : "";
 
 export function playerLines(player, me, { playerNames = true, heldItems = true } = {}) {
   const name = playerNames ? player.name : undefined;
@@ -34,18 +39,39 @@ export function decode(raw) {
   for (const key of Object.keys(p.layers)) {
     const dots = p.layers[key];
     if (!layers.includes(key) || !Array.isArray(dots) || dots.length > 512 || !dots.every(validPoint)) return null;
+    if (key === "stashLoot") {
+      if (!dots.every(p => stashLootKinds.includes(p.kind))) return null;
+      safe.stashLoot = dots.map(({x, z, kind}) => ({x, z, kind}));
+      continue;
+    }
     if (key === "events") {
       if (dots.length > 128 || !dots.every(e => eventKinds.includes(e.kind) && shortText(e.label))) return null;
       safe.events = dots.map(({x, z, kind, label}) => ({x, z, kind, label}));
       continue;
     }
+    if (key === "corpses") {
+      const ids = new Set();
+      if (dots.length > 128) return null;
+      for (const {id, ttlMs} of dots) {
+        if (!validPlayerId(id) || ids.has(id) || !Number.isInteger(ttlMs) || ttlMs <= 0 || ttlMs > corpseLifetime) return null;
+        ids.add(id);
+      }
+      safe.corpses = dots.map(({x, z, id, ttlMs}) => ({x, z, id, ttlMs}));
+      continue;
+    }
+    if (key === "vehicles") {
+      if (!dots.every(p => p.covered === undefined || typeof p.covered === "boolean")) return null;
+      safe.vehicles = dots.map(({x, z, covered}) => ({x, z, covered: covered === true}));
+      continue;
+    }
     const playerIds = new Set();
-    safe[key] = dots.map(({x, z, category, heading, id, name, held, friend}) => ({
+    safe[key] = dots.map(({x, z, category, heading, id, name, held, health, friend}) => ({
       x, z, category: Number.isInteger(category) ? category : null,
       heading: key === "players" ? heading : undefined,
       id: key === "players" ? id : undefined,
       name: key === "players" ? shortText(name) : undefined,
       held: key === "players" ? shortText(held) : undefined,
+      health: key === "players" && validHealth(health) ? health : undefined,
       friend: key === "players" && friend === true,
     }));
     if (key === "players") {
@@ -58,9 +84,41 @@ export function decode(raw) {
     }
   }
   const me = p.me === null ? null : { x: p.me.x, z: p.me.z, heading: p.me.heading,
-    name: shortText(p.me.name), held: shortText(p.me.held) };
+    name: shortText(p.me.name), held: shortText(p.me.held), health: validHealth(p.me.health) ? p.me.health : undefined };
   const heldShared = typeof p.heldShared === "boolean" ? p.heldShared : undefined;
-  return { live: p.live, map: p.map, me, layers: safe, heldShared };
+  const healthShared = typeof p.healthShared === "boolean" ? p.healthShared : undefined;
+  return { live: p.live, map: p.map, me, layers: safe, heldShared, healthShared };
+}
+
+export class CorpseVisibility {
+  constructor(hidden = []) {
+    this.hidden = new Set(Array.isArray(hidden) ? hidden.filter(validPlayerId).slice(-128) : []);
+    this.deadlines = new Map();
+    this.firstClick = null;
+  }
+
+  update(markers, now) {
+    const next = new Map();
+    for (const {id, ttlMs} of markers) {
+      next.set(id, Math.min(this.deadlines.get(id) ?? Infinity, now + ttlMs));
+    }
+    this.deadlines = next;
+  }
+
+  visible(marker, now) {
+    return !this.hidden.has(marker.id) && (this.deadlines.get(marker.id) ?? 0) > now;
+  }
+
+  click(id, now) {
+    if (id && this.firstClick?.id === id && now - this.firstClick.at <= 400) {
+      this.hidden.add(id);
+      if (this.hidden.size > 128) this.hidden.delete(this.hidden.values().next().value);
+      this.firstClick = null;
+      return true;
+    }
+    this.firstClick = id ? {id, at: now} : null;
+    return false;
+  }
 }
 
 export class LiveConnection {

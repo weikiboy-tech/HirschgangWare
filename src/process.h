@@ -46,7 +46,7 @@ public:
     virtual size_t readMany(std::vector<ReadReq>& reqs) const;
 
     virtual void maintain() {}
-    virtual bool prepareRemoteKeys() { return false; }
+    virtual bool prepareRemoteKeys(std::string& detail) { detail = "no keyboard provider"; return false; }
     virtual dma_keyboard::Sample remoteKeySample() const { return {}; }
 
     bool readPtr(uintptr_t addr, uint32_t ptrSize, uint64_t& out) const;

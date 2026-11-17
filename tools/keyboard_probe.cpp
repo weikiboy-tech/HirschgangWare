@@ -107,7 +107,7 @@ int wmain(int argc, wchar_t** argv) try {
     vmm.open(argv[1]);
     const auto [build, revision] = vmm.version();
     std::printf("Target Windows: %lu.%lu\n", build, revision);
-    const auto candidate = resolve(vmm, session, true);
+    const auto candidate = resolve(vmm, session, true, build == 26200 && revision == 9711);
     const auto [reader, address] = candidate;
     const uint64_t oldExport = vmm.exportAddress(vmm.handle, reader, "win32kbase.sys", "gafAsyncKeyState");
     std::printf("Legacy export: 0x%llx\n", oldExport);
