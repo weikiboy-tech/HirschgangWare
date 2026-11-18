@@ -75,6 +75,8 @@ assert.equal(decode(valid).me.heading,-179);
 const stashPacket = JSON.parse(valid);
 const highValuePacket = {...stashPacket, layers:{highValues:[{x:520,z:940}]}};
 assert.deepEqual(decode(JSON.stringify(highValuePacket)).layers.highValues,[{x:520,z:940}]);
+assert.deepEqual(decode(JSON.stringify({...highValuePacket,layers:{highValues:[{x:520,z:940,bitcoin:true}]}})).layers.highValues,[{x:520,z:940,bitcoin:true}]);
+assert.equal(decode(JSON.stringify({...highValuePacket,layers:{highValues:[{x:520,z:940,bitcoin:"yes"}]}})),null);
 assert.equal(decode(JSON.stringify({...highValuePacket,layers:{highValues:[{x:-1,z:940}]}})),null);
 stashPacket.layers = {stashLoot: [
   {x:450,z:960,kind:"backpack",label:"HuntingBag_Autumn"},
@@ -125,6 +127,8 @@ assert.deepEqual(playerLines(visible.get(firstId), decoded.me, {playerNames:fals
 assert.deepEqual(playerLines(visible.get(firstId), decoded.me, {heldItems:false}), ["Freund  3m"]);
 assert.deepEqual(playerLines(visible.get(firstId), decoded.me, {playerNames:false, heldItems:false}), []);
 assert.equal(decode(JSON.stringify({...playerPacket, heldShared:false})).heldShared, false);
+assert.equal(decode(JSON.stringify({...playerPacket, namesShared:false})).namesShared, false);
+assert.equal(decode(JSON.stringify({...playerPacket, namesShared:true})).namesShared, true);
 assert.deepEqual(playerLines({held:"Rifle"}, decoded.me), ["Rifle"]);
 assert.deepEqual(playerLines(visible.get(secondId), decoded.me), []);
 assert.equal(decode(JSON.stringify({...playerPacket, layers: {events: [{x:7,z:8,kind:"unverified",label:"Airdrop"}]}})),null);

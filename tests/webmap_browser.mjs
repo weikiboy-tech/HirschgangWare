@@ -65,7 +65,7 @@ try {
       let body = first.toString();
       const verify = () => {
         if (body.includes('"name":"private-player"') && body.includes('"friend":true') &&
-            body.includes('"highValues":[{"x":520,"z":940},{"x":630,"z":940}]') &&
+            body.includes('"highValues":[{"x":520,"z":940,"bitcoin":true},{"x":630,"z":940}]') &&
             body.includes('"vehicles":[{"x":490,"z":1080},{"x":710,"z":1080,"covered":true}]') &&
             body.includes('"stashLoot":[{"x":450,"z":960,"kind":"backpack"},{"x":560,"z":960,"kind":"vehicle-key"},{"x":670,"z":960,"kind":"stash"}]')) {
           done(101); client.destroy();
@@ -133,9 +133,9 @@ try {
             const m = this.getTransform();
             window.paint.cars.push({x: m.e, y: m.f});
           }
-          if (name === "stroke" && args[0] instanceof Path2D && this.strokeStyle === "#dacb8c") {
+          if (name === "stroke" && args[0] instanceof Path2D && ["#dacb8c", "#f0b44d"].includes(this.strokeStyle)) {
             const m = this.getTransform();
-            window.paint.valuables.push({x: m.e, y: m.f});
+            window.paint.valuables.push({x: m.e, y: m.f, color: this.strokeStyle});
           }
           if (name === "fillText") window.paint.names.push(args[0]);
           if (name === "fill") {
@@ -160,6 +160,11 @@ try {
         await call("Input.dispatchMouseEvent", {type, x, y, button: "left", clickCount: 1}, sessionId);
     };
     evaluate.reload = () => call("Page.reload", {}, sessionId);
+    evaluate.viewport = (width, height) => call("Emulation.setDeviceMetricsOverride", {width, height, deviceScaleFactor: 1, mobile: false}, sessionId);
+    evaluate.screenshot = async path => {
+      const capture = await call("Page.captureScreenshot", {format: "png"}, sessionId);
+      await writeFile(path, Buffer.from(capture.data, "base64"));
+    };
     return evaluate;
   }
   const host = await browser(), guest = await browser();
@@ -175,6 +180,7 @@ try {
   const eventPositions = (await host("paint.events")).sort((a, b) => a.x - b.x);
   const highValues = await until(() => host("paint.valuables.length === 2 && paint.valuables"), "high value cash symbols visible");
   assert.ok(highValues[0].x < highValues[1].x && highValues[0].y === highValues[1].y);
+  assert.deepEqual(highValues.map(p => p.color), ["#f0b44d", "#dacb8c"]);
   assert.equal(await host("paint.names.some(name => /GZ_Bitcoin|GZEFT_LEDX|High Valuables/.test(name))"), false);
   await host("document.querySelector('#high-values-layer').click()");
   await until(() => host("paint.valuables.length === 0"), "high value browser switch hides cash symbols");
@@ -253,6 +259,11 @@ try {
   assert.ok((await host(opts)).includes("private-player · Freund"));
   assert.equal(await host("JSON.parse(localStorage.getItem('hirschgangware.webmap.v1')).playerNames"), false);
   await host("document.querySelector('#player-names').click()");
+  await host("document.querySelector('#labels').click()");
+  await host("document.querySelector('#player-names').click()");
+  await host("document.querySelector('#player-names').click()");
+  assert.equal(await host("document.querySelector('#labels').checked"), true);
+  await until(() => host("paint.names.some(t => t.startsWith('private-player'))"), "enabling player names restores labels");
   await host("document.querySelector('#held-items').click()");
   await until(() => host("!paint.names.includes('GZ_TestRifle') && paint.names.some(t => t.startsWith('private-player'))"), "hide held item only");
   assert.equal(await host("JSON.parse(localStorage.getItem('hirschgangware.webmap.v1')).heldItems"), false);
@@ -326,7 +337,33 @@ try {
   await until(() => host("paint.events.length === 3"), "events ready before map change");
   fixture.stdin.write("mapchange\n");
   await until(() => guest("document.querySelector('#map-select').value === 'different' && paint.events.length === 0 && paint.corpses.length === 0"), "events and corpses cleared on map change");
-  console.log("PASS two isolated Chrome clients: live player labels, held item, event positions, corpse dismissal, layer releases, map switch, follow and friend colors");
+  for (const evaluate of [host, guest]) {
+    assert.equal(await evaluate("document.querySelector('#connection-screen').hidden"), true);
+    assert.equal(await evaluate("getComputedStyle(document.querySelector('#canvas')).visibility"), "visible");
+  }
+  const savedFollow = await guest("document.querySelector('#follow').checked");
+  fixture.stdin.write("hide\n");
+  await until(() => guest("!document.querySelector('#connection-screen').hidden && getComputedStyle(document.querySelector('#canvas')).visibility === 'hidden'"), "waiting screen when transport is open but no live map is published");
+  assert.equal(await guest("document.querySelector('#connection-screen').textContent.includes('Hirschgang-Server')"), true);
+  assert.equal(await guest("document.querySelector('.connection-logo').complete && document.querySelector('.connection-logo').naturalWidth > 0"), true);
+  await guest.viewport(1280, 800);
+  await guest.screenshot(resolve("build/webmap-test/waiting-desktop.png"));
+  await guest.viewport(390, 844);
+  await guest("document.querySelector('#close-sidebar').click()");
+  await until(() => guest(`(() => {
+    const card = document.querySelector('.connection-card').getBoundingClientRect();
+    return card.left >= 0 && card.right <= innerWidth && card.top >= 0 && card.bottom <= innerHeight;
+  })()`), "mobile waiting screen fits viewport");
+  await guest.screenshot(resolve("build/webmap-test/waiting-mobile.png"));
+  await guest.viewport(1280, 800);
+  fixture.stdin.write("events\n");
+  await until(() => guest("document.querySelector('#connection-screen').hidden && getComputedStyle(document.querySelector('#canvas')).visibility === 'visible'"), "live data restores map");
+  fixture.stdin.write("off\n");
+  await until(() => guest("!document.querySelector('#connection-screen').hidden && document.querySelector('#stage').getAttribute('aria-busy') === 'true'"), "connection loss hides map");
+  fixture.stdin.write("events\n");
+  await until(() => guest("document.querySelector('#connection-screen').hidden && document.querySelector('#stage').getAttribute('aria-busy') === 'false'"), "automatic reconnect restores map");
+  assert.equal(await guest("document.querySelector('#follow').checked"), savedFollow);
+  console.log("PASS two isolated Chrome clients: player labels, loot icons, tracking, releases, waiting screen and automatic reconnect");
 } finally {
   relay?.close();
   socket?.close();

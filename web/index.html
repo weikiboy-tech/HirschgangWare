@@ -44,6 +44,7 @@
         <label class="toggle"><span>Ortsnamen</span><input id="places" type="checkbox"></label>
         <label class="toggle"><span>Beschriftungen</span><input id="labels" type="checkbox"></label>
         <label class="toggle"><span>Spielernamen auf Karte</span><input id="player-names" type="checkbox"></label>
+        <p class="hint" id="names-status" hidden></p>
         <label class="toggle"><span>Waffen auf Karte</span><input id="held-items" type="checkbox"></label>
         <p class="hint" id="held-status" hidden></p>
         <label class="toggle"><span>Leben auf Karte (0–100)</span><input id="health" type="checkbox"></label>
@@ -55,14 +56,14 @@
             <button type="button" id="stash-loot-expand" aria-controls="stash-loot-options" aria-expanded="false" aria-label="Loot-Typen einblenden">▸</button>
           </div>
           <div id="stash-loot-options" hidden>
-            <label class="toggle"><span>Rucksäcke</span><input type="checkbox" data-stash-kind="backpack"></label>
+            <label class="toggle"><span>Rucksäcke &amp; Duffel Bags</span><input type="checkbox" data-stash-kind="backpack"></label>
             <label class="toggle"><span>Fahrzeugschlüssel</span><input type="checkbox" data-stash-kind="vehicle-key"></label>
-            <label class="toggle"><span>Stashes</span><input type="checkbox" data-stash-kind="stash"></label>
+            <label class="toggle"><span>Hidden Stashes &amp; Safes</span><input type="checkbox" data-stash-kind="stash"></label>
           </div>
           <p class="hint" id="stash-loot-status" hidden></p>
           <label class="toggle"><span>Fahrzeuge</span><input id="vehicle-layer" type="checkbox"></label>
           <p class="hint" id="vehicle-status" hidden></p>
-          <label class="toggle"><span>High Valuables</span><input id="high-values-layer" type="checkbox"></label>
+          <label class="toggle"><span>High Valuables &gt;50k</span><input id="high-values-layer" type="checkbox"></label>
           <p class="hint" id="high-values-status" hidden></p>
         <label class="toggle"><span>Koordinatengitter</span><input id="grid" type="checkbox"></label>
         <label class="toggle"><span>Wegpunkte</span><input id="waypoints" type="checkbox"></label>
@@ -85,7 +86,7 @@
         <p id="connection-error" class="error" role="status"></p>
       </section>
     </aside>
-    <main id="stage" aria-label="Kartenansicht">
+    <main id="stage" class="waiting" aria-label="Kartenansicht" aria-busy="true">
       <canvas id="canvas" aria-label="Interaktive Weltkarte" tabindex="0"></canvas>
       <header class="map-toolbar">
         <button id="open-sidebar" type="button" aria-label="Karteneinstellungen öffnen" aria-controls="sidebar">☰</button>
@@ -95,6 +96,15 @@
       </header>
       <p id="map-message" role="status"></p>
       <footer class="map-footer"><span id="coords" class="pill">X – · Z –</span></footer>
+      <div id="connection-screen" role="status" aria-live="polite" aria-atomic="true">
+        <div class="connection-card">
+          <img src="/hirschgang-logo.png" width="144" height="144" alt="Hirschgang" class="connection-logo">
+          <span class="connection-eyebrow">HIRSCHGANG LIVE RADAR</span>
+          <h1>Warten auf Verbindung<br>zum Hirschgang-Server</h1>
+          <p>Deine Karte ist gleich wieder da.</p>
+          <span class="connection-retry"><span class="connection-spinner" aria-hidden="true"></span>Verbindung wird automatisch wiederhergestellt</span>
+        </div>
+      </div>
     </main>
   </div>
   <script type="module" src="/app.js"></script>

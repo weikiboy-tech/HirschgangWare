@@ -38,7 +38,19 @@ struct Cand {
     float maxTolerancePx = 0;
 };
 
+// Prepare the target list once per frame. Rendered radar/overlay entities stay intact.
+inline void removeFriends(std::vector<Cand>& candidates) {
+    candidates.erase(std::remove_if(candidates.begin(), candidates.end(),
+        [](const Cand& candidate) { return candidate.isFriend; }), candidates.end());
+}
+
 enum class InputSource { Legacy, MainPc, SecondPc, Box };
+struct Binding {
+    int key = 0;
+    int hid = 0;
+    InputSource source = InputSource::SecondPc;
+};
+inline bool bindableKey(int key) { return key > 0 && key < 255 && key != 27; }
 
 struct Config {
     bool enabled = false;
@@ -74,6 +86,7 @@ struct Config {
     bool moduleOpen = false;
     bool showDebug = false;
     bool showRegions = false;
+    Binding secondary;
 };
 
 struct TargetMatch {
@@ -148,6 +161,7 @@ struct Live {
     std::string lastRx;
     std::string clickStatus;
     unsigned regionCount = 0;
+    std::array<bool, 2> boundHeld{};
 };
 
 Config& cfg();
@@ -159,8 +173,12 @@ int baudUsed();  // 0 while not connected, else the baud that worked
 void probeInput();  // step through candidate enable-commands, logging all raw replies
 bool probing();
 bool justBound();  // a bind happened <450ms ago (so a stop-click does not restart it)
-void startCapture();
+void startCapture(int slot = 0);
 void stopCapture();
+bool cancelCaptureEscape(); // Also consumes the matching window Escape event/repeats.
+int captureSlot();
+Binding binding(int slot);
+void clearBinding(int slot);
 
 void load();
 void save();
@@ -176,9 +194,10 @@ void update(const std::vector<Cand>& cands, float cx, float cy, bool projectionR
 
 void setLog(void (*fn)(const char*));
 void setRemoteKeys(dma_keyboard::Sample (*fn)());
+void setLocalKeyReader(bool (*fn)(int)); // Optional adapter; defaults to GetAsyncKeyState.
 void pollInputs();
 bool remoteKeysReady();
-const char* keySourceLabel();
+const char* keySourceLabel(int slot = 0);
 const std::string& ident();
 void sendRaw(const std::string& cmd);
 int monitorPresetCount();

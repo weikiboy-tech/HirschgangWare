@@ -251,11 +251,12 @@ try:
         {"x": 700, "z": 1020, "kind": "loot-cluster", "label": "Loot-H\u00e4ufung"},
     ]
     assert snap["layers"]["players"][0]["held"] == "GZ_TestRifle"
-    assert snap["layers"]["highValues"] == [{"x": 520, "z": 940}, {"x": 630, "z": 940}]
+    assert snap["layers"]["highValues"] == [{"x": 520, "z": 940, "bitcoin": True}, {"x": 630, "z": 940}]
     assert all(dot["z"] != 940 for dot in snap["layers"]["loot"])
     assert snap["layers"]["vehicles"] == [{"x": 490, "z": 1080}, {"x": 710, "z": 1080, "covered": True}]
     assert all(dot["z"] != 1080 for dot in snap["layers"]["loot"])
     assert snap["heldShared"] is True
+    assert snap["namesShared"] is True
     assert snap["me"]["held"] == "OwnRifle"
     assert "held" not in snap["layers"]["players"][1]
     snap, _ = released("swap", lambda p: any(d.get("held") == "GZ_SecondRifle" for d in p["layers"].get("players", [])))
@@ -269,6 +270,7 @@ try:
     assert b'"held"' not in packet and b"GZ_SecondRifle" not in packet and b'"events"' not in packet
     snap, packet = released("held", lambda p: p["layers"].get("players") and not p["layers"]["players"][0].get("name"))
     assert "name" not in snap["me"] and b"private-player" not in packet
+    assert snap["namesShared"] is False
     assert snap["layers"]["players"][0]["held"] == "GZ_SecondRifle"
     released("events", lambda p: p["layers"].get("events"))
     snap, _ = released("mapchange", lambda p: p["map"] == "different")
@@ -281,7 +283,7 @@ try:
     snap, _ = released("on", lambda p: set(p["layers"]) == {"loot"})
     assert all(dot["z"] != 1080 for dot in snap["layers"]["loot"])
     snap, packet = released("high-values-only", lambda p: set(p["layers"]) == {"highValues"})
-    assert snap["layers"]["highValues"] == [{"x": 520, "z": 940}, {"x": 630, "z": 940}]
+    assert snap["layers"]["highValues"] == [{"x": 520, "z": 940, "bitcoin": True}, {"x": 630, "z": 940}]
     assert b"GZ_Bitcoin" not in packet and b"GZEFT_LEDX" not in packet
     snap, packet = released("on", lambda p: set(p["layers"]) == {"loot"})
     assert all(dot["z"] != 940 for dot in snap["layers"]["loot"])

@@ -65,9 +65,11 @@ const vehicleIcon = { color: "#a8c8fe", path: new Path2D(
   "M -8 4 V 0 L -5 -5 H 5 L 8 0 V 4 Z M -8 0 H 8 M -6 4 V 6 M 6 4 V 6 M -5 2 H -4 M 4 2 H 5") };
 const highValueIcon = { color: "#dacb8c", path: new Path2D(
   "M 3 -3.5 C 1 -6 -4 -5 -3 -1.8 C -2 .4 3 -.2 3 2 C 3 5 -1 5 -3 3.5 M 0 -6 V 6") };
+const bitcoinIcon = { color: "#f0b44d", path: new Path2D(
+  "M 7 0 A 7 7 0 1 1 -7 0 A 7 7 0 1 1 7 0 M -2 -5 V 5 M 0 -5 V 5 M -3 -3.5 H 1 C 5 -3.5 5 0 1 0 H -2 M 1 0 C 5 0 5 3.5 1 3.5 H -3") };
 const friendColor = "#3cff8c";
 const trackingOrder = new Intl.Collator("de", { numeric: true });
-const matchLive = () => live && selected && live.map === selected.id;
+const matchLive = () => live?.live && selected && live.map === selected.id;
 const pointsOnMap = () => prefs.points.filter(p => p.map === selected?.id);
 function trackingLabel(id) {
   const player = targets.get(id);
@@ -298,7 +300,7 @@ function draw(now) {
       if (live.me) marker(trackedMarkerId === "own" ? camera.marker : live.me, prefs.markerSize, "#65f1d3",
         playerLines(live.me, null, prefs), false, healthLine(live.me, prefs.health));
       if (prefs.filters.vehicles !== false) for (const item of live.layers.vehicles ?? []) outlineMarker(item, vehicleIcon);
-      if (prefs.filters.highValues !== false) for (const item of live.layers.highValues ?? []) outlineMarker(item, highValueIcon);
+      if (prefs.filters.highValues !== false) for (const item of live.layers.highValues ?? []) outlineMarker(item, item.bitcoin ? bitcoinIcon : highValueIcon);
       if (prefs.filters.stashLoot !== false) for (const item of live.layers.stashLoot ?? []) {
         if (prefs.stashKinds[item.kind] !== false) outlineMarker(item, stashLootIcons[item.kind]);
       }
@@ -488,6 +490,16 @@ function updateLayers() {
   const held = $("held-status");
   const hasMap = !!(live?.live && live.map);
   const hasPlayers = !!(live?.me || live?.layers.players);
+  const namesStatus = $("names-status");
+  let namesMessage = "";
+  if (hasMap && live.namesShared === false)
+    namesMessage = "Am Host unter Map → Webmap „Player names“ freigeben.";
+  else if (hasMap && prefs.playerNames && !prefs.labels)
+    namesMessage = "Spielernamen benötigen aktive Beschriftungen.";
+  else if (hasMap && live.layers.players?.length && !live.layers.players.some(p => p.name))
+    namesMessage = "Noch keine eindeutig zugeordneten Spielernamen vom Host empfangen.";
+  namesStatus.textContent = namesMessage;
+  namesStatus.hidden = !namesMessage;
   const legacy = hasPlayers && live.heldShared === undefined &&
     !live.me?.held && !live.layers.players?.some(player => player.held);
   let heldMessage = "";
@@ -542,6 +554,12 @@ function updateLayers() {
 }
 
 let lastPacket = "", error = "";
+function updateConnectionScreen() {
+  const waiting = status !== "online" || !live?.live || !live.map;
+  $("stage").classList.toggle("waiting", waiting);
+  $("stage").setAttribute("aria-busy", String(waiting));
+  $("connection-screen").hidden = !waiting;
+}
 function connectionState(state, reason) {
   if (state === "online") error = "";
   else if (reason) error = reason;
@@ -558,6 +576,7 @@ function connectionState(state, reason) {
     clearTimeout(corpseTimer);
     syncTracking(); updateLayers(); redraw();
   }
+  updateConnectionScreen();
 }
 
 function packet(update) {
@@ -567,6 +586,7 @@ function packet(update) {
   lastPacket = stamp;
   if (live?.map !== update.map) corpses.firstClick = null;
   live = update;
+  updateConnectionScreen();
   corpses.update(update.layers.corpses ?? [], performance.now());
   scheduleCorpseExpiry();
   if (prefs.autoMap && update.map && update.map !== selected?.id) {
@@ -637,7 +657,8 @@ for (const [id, key] of Object.entries({
   $(id).checked = prefs[key];
   $(id).onchange = () => {
     prefs[key] = $(id).checked;
-    if (key === "heldItems" && prefs.heldItems) $("labels").checked = prefs.labels = true;
+    if ((key === "heldItems" && prefs.heldItems) || (key === "playerNames" && prefs.playerNames))
+      $("labels").checked = prefs.labels = true;
     if (key === "follow") camera.setFollow(prefs.follow);
     if (key === "rotate") camera.rotate = prefs.rotate;
     if (key === "smooth") camera.smooth = prefs.smooth;

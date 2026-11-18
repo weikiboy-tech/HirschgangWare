@@ -39,6 +39,7 @@
 #include "friends.h"
 #include "loot.h"
 #include "overlay_motion.h"
+#include "player_identity.h"
 #include "mapdl.h"
 #include "trigger.h"
 #include "trigger_geometry.h"
@@ -150,6 +151,7 @@ std::unordered_map<uint64_t, Vec3> gDzEntVel;
 std::unordered_map<uint64_t, uint64_t> gDzEntPosUs;
 std::unordered_map<uint64_t, std::pair<float, float>> gDzEntFwd;
 std::unordered_map<uint64_t, uint32_t> gDzWebTrackIds;
+std::unordered_map<uint64_t, uint32_t> gDzWebTrackNetIds;
 uint32_t gDzNextWebTrackId = 0;
 std::unordered_map<uint64_t, std::string> gDzEntName;
 std::unordered_map<uint64_t, uint64_t> gDzLootVs;
@@ -543,7 +545,7 @@ constexpr uint32_t kNcRoster = 0x18;
 constexpr uint32_t kIdName = 0xF8;
 constexpr uint32_t kIdNetId = 0x30, kEntNetId = 0x664;
 constexpr int kMaxRoster = 256;
-constexpr ULONGLONG kRosterMs = 2000;
+constexpr ULONGLONG kRosterMs = 500;
 constexpr uint32_t kLocalLink = 0x29B0, kLocalDeref = 0x8, kLocalAdj = 0xA8;
 constexpr uint32_t kFlags = 0x150;
 constexpr uint32_t kIsDead = 0x156;
@@ -1026,6 +1028,10 @@ void scanDayz(DzSnap& out, const char*& stage) {
             namesWorld = world;
             gDzMeName.clear();
             gDzRoster.clear();
+            gDzRosterTick = 0;
+            gDzEntName.clear();
+            gDzWebTrackIds.clear();
+            gDzWebTrackNetIds.clear();
             gDzOnline.reset();
             gDzEntNetId.clear();
             gDzServerTick = 0;
@@ -1073,12 +1079,13 @@ void scanDayz(DzSnap& out, const char*& stage) {
     const uint64_t local = dz::heapPtr(localInner) ? localInner - dz::kLocalAdj : 0;
 
     std::vector<uint64_t> ents;
+    std::unordered_set<uint64_t> uniqueEntities;
     for (uint64_t s : slots)
-        if (dz::heapPtr(s) && s != local) ents.push_back(s);
+        if (dz::heapPtr(s) && s != local && uniqueEntities.insert(s).second) ents.push_back(s);
     if (local) ents.push_back(local);
     out.slots = ents.size();
     if (gDzReadEvents.load(std::memory_order_relaxed) || gDzReadStashLoot.load(std::memory_order_relaxed) ||
-        gDzReadCoveredVehicles.load(std::memory_order_relaxed)) {
+        gDzReadCoveredVehicles.load(std::memory_order_relaxed) || gDzReadHighValues.load(std::memory_order_relaxed)) {
         std::lock_guard<std::mutex> lock(gDzLootMx);
         if (gDzEventSlotsWorld != world || now - gDzEventSlotsAt >= 300) {
             gDzEventSlots = ents;
@@ -1095,7 +1102,6 @@ void scanDayz(DzSnap& out, const char*& stage) {
     const bool posSweep = now - gDzPosSweepTick >= 10000;
     if (posSweep) {
         gDzEntName.clear();
-        gDzEntNetId.clear();
         gDzPosSweepTick = now;
     }
 
@@ -1139,6 +1145,7 @@ void scanDayz(DzSnap& out, const char*& stage) {
         prune(gDzEntPosUs);
         prune(gDzEntFwd);
         prune(gDzWebTrackIds);
+        prune(gDzWebTrackNetIds);
         prune(gDzEntJointOfs);
         prune(gDzEntJointUs);
         prune(gDzEntReadUs);
@@ -1351,7 +1358,9 @@ void scanDayz(DzSnap& out, const char*& stage) {
             const auto rootRead = gDzEntReadUs.find(ptr);
             if (rootRead != gDzEntReadUs.end()) ee.rootUs = rootRead->second;
             const auto nIt = gDzEntName.find(ptr);
-            if (nIt != gDzEntName.end()) {
+            if (ee.kind == 1) {
+                // A character/model name is not a player's network identity.
+            } else if (nIt != gDzEntName.end()) {
                 ee.name = nIt->second;
             } else if (ee.kind != 2) {
                 needNameIdx.push_back(out.ents.size());
@@ -1425,7 +1434,7 @@ void scanDayz(DzSnap& out, const char*& stage) {
     }
 #endif
 
-    constexpr size_t kPName = 48;
+    constexpr size_t kPName = 80;
     auto cleanName = [](const uint8_t* raw, size_t cap) -> std::string {
         const char* t = reinterpret_cast<const char*>(raw);
         size_t n = 0;
@@ -1466,18 +1475,20 @@ void scanDayz(DzSnap& out, const char*& stage) {
     if (now - gDzRosterTick >= dz::kRosterMs) {
         gDzRosterTick = now;
         std::unordered_map<uint32_t, std::string> fresh;
+        std::unordered_set<uint32_t> conflictingIds;
         bool rosterRead = false;
         uint64_t nc = 0, arr = 0;
         if (gProc->read(uintptr_t(base + dz::kNetClient), nc) && dz::heapPtr(nc) && gProc->read(uintptr_t(nc + dz::kNcRoster), arr) &&
             dz::heapPtr(arr)) {
             int32_t cnt = 0;
-            gProc->read(uintptr_t(nc + dz::kNcRoster + 8), cnt);
-            if (cnt <= 0 || cnt > dz::kMaxRoster) cnt = dz::kMaxRoster;
+            const bool countOk = gProc->read(uintptr_t(nc + dz::kNcRoster + 8), cnt);
+            if (!countOk || cnt < 0 || cnt > dz::kMaxRoster) cnt = 0;
             std::vector<uint64_t> ids(size_t(cnt), 0);
-            if (gProc->read(uintptr_t(arr), ids.data(), ids.size() * 8)) {
+            if (countOk && cnt > 0 && gProc->read(uintptr_t(arr), ids.data(), ids.size() * 8)) {
                 std::vector<uint64_t> live;
+                std::unordered_set<uint64_t> uniqueRows;
                 for (uint64_t id : ids)
-                    if (dz::heapPtr(id)) live.push_back(id);
+                    if (dz::heapPtr(id) && uniqueRows.insert(id).second) live.push_back(id);
                 std::vector<uint32_t> nid(live.size(), 0);
                 std::vector<uint64_t> str(live.size(), 0);
                 reqs.clear();
@@ -1486,22 +1497,43 @@ void scanDayz(DzSnap& out, const char*& stage) {
                     reqs.push_back({uintptr_t(live[k] + dz::kIdName), &str[k], 8});
                 }
                 gProc->readMany(reqs);
+                std::vector<bool> fieldsOk(live.size());
+                for (size_t k = 0; k < live.size(); ++k)
+                    fieldsOk[k] = reqs[2*k].ok && reqs[2*k+1].ok;
                 std::vector<uint8_t> nb(live.size() * kPName, 0);
                 reqs.clear();
                 for (size_t k = 0; k < live.size(); ++k)
                     reqs.push_back({uintptr_t(dz::heapPtr(str[k]) ? str[k] + dz::kNameText : 0), &nb[k * kPName], kPName});
                 gProc->readMany(reqs);
+                std::vector<std::string> rowNames(live.size());
+                for (size_t k = 0; k < live.size(); ++k)
+                    if (fieldsOk[k] && reqs[k].ok) rowNames[k] = player_identity::text(&nb[k * kPName], kPName);
+                std::vector<uint32_t> idsAgain(live.size());
+                std::vector<uint64_t> stringsAgain(live.size());
+                reqs.clear();
+                for (size_t k = 0; k < live.size(); ++k) {
+                    reqs.push_back({uintptr_t(live[k] + dz::kIdNetId), &idsAgain[k], 4});
+                    reqs.push_back({uintptr_t(live[k] + dz::kIdName), &stringsAgain[k], 8});
+                }
+                gProc->readMany(reqs);
 #ifndef HIRSCHGANGWARE_NO_DIAG
                 size_t anon = SIZE_MAX;
 #endif
                 for (size_t k = 0; k < live.size(); ++k) {
-                    const std::string nm = reqs[k].ok ? cleanName(&nb[k * kPName], kPName) : std::string();
-                    if (!nm.empty() && nid[k]) fresh[nid[k]] = nm;
+                    const bool stable = reqs[2*k].ok && reqs[2*k+1].ok &&
+                        idsAgain[k] == nid[k] && stringsAgain[k] == str[k];
+                    const std::string nm = stable ? rowNames[k] : std::string();
+                    player_identity::insert(fresh, conflictingIds, nid[k], nm);
 #ifndef HIRSCHGANGWARE_NO_DIAG
                     if (anon == SIZE_MAX && nm.rfind("Survivor", 0) == 0) anon = k;
 #endif
                 }
-                rosterRead = true;
+                // Validate the table again after reading its rows; do not publish a torn list.
+                uint64_t ncAgain = 0, arrAgain = 0;
+                int32_t countAgain = -1;
+                rosterRead = gProc->read(uintptr_t(base + dz::kNetClient), ncAgain) && ncAgain == nc &&
+                    gProc->read(uintptr_t(nc + dz::kNcRoster), arrAgain) && arrAgain == arr &&
+                    gProc->read(uintptr_t(nc + dz::kNcRoster + 8), countAgain) && countAgain == cnt;
 #ifndef HIRSCHGANGWARE_NO_DIAG
                 static uint64_t probedWorld = 0;
                 if (probedWorld != world && !fresh.empty()) {
@@ -1534,7 +1566,8 @@ void scanDayz(DzSnap& out, const char*& stage) {
 #endif
             }
         }
-        if (rosterRead) {
+        {
+            if (!rosterRead) fresh.clear();
             gDzRoster = std::move(fresh);
             auto names = std::make_shared<std::vector<std::string>>();
             for (const auto& kv : gDzRoster) names->push_back(kv.second);
@@ -1542,25 +1575,36 @@ void scanDayz(DzSnap& out, const char*& stage) {
             if (!gDzOnline || *gDzOnline != *names) gDzOnline = std::move(names);
         }
     }
-    if (!gDzRoster.empty()) {
+    std::unordered_map<uint64_t, std::string> resolvedNames;
+    {
         std::vector<size_t> needId;
         for (size_t k = 0; k < out.ents.size(); ++k)
-            if (out.ents[k].kind == 1 && !gDzEntNetId.count(out.ents[k].ptr)) needId.push_back(k);
+            if (out.ents[k].kind == 1) needId.push_back(k);
+        std::unordered_map<uint64_t, uint32_t> currentIds;
         if (!needId.empty()) {
             std::vector<uint32_t> nid(needId.size(), 0);
             reqs.clear();
             for (size_t k = 0; k < needId.size(); ++k) reqs.push_back({uintptr_t(out.ents[needId[k]].ptr + dz::kEntNetId), &nid[k], 4});
             gProc->readMany(reqs);
             for (size_t k = 0; k < needId.size(); ++k)
-                if (reqs[k].ok) gDzEntNetId[out.ents[needId[k]].ptr] = nid[k];
+                if (reqs[k].ok && nid[k]) currentIds[out.ents[needId[k]].ptr] = nid[k];
         }
+        uint32_t myId = 0;
+        if (local && gProc->read(uintptr_t(local + dz::kEntNetId), myId) && myId) currentIds[local] = myId;
+        resolvedNames = player_identity::resolve(gDzRoster, currentIds);
         for (DzSnap::E& e : out.ents) {
             if (e.kind != 1) continue;
-            const auto idIt = gDzEntNetId.find(e.ptr);
-            if (idIt == gDzEntNetId.end()) continue;
-            const auto nmIt = gDzRoster.find(idIt->second);
-            if (nmIt != gDzRoster.end()) e.name = nmIt->second;
+            const auto current = currentIds.find(e.ptr);
+            if (current != currentIds.end()) {
+                auto& previous = gDzWebTrackNetIds[e.ptr];
+                if (previous && previous != current->second)
+                    e.webTrackId = gDzWebTrackIds[e.ptr] = ++gDzNextWebTrackId;
+                previous = current->second;
+            }
+            const auto named = resolvedNames.find(e.ptr);
+            e.name = named == resolvedNames.end() ? std::string() : named->second;
         }
+        gDzEntNetId = std::move(currentIds);
 #ifndef HIRSCHGANGWARE_NO_DIAG
         static ULONGLONG lastRosterLog = 0;
         if (now - lastRosterLog >= 10000) {
@@ -1571,7 +1615,7 @@ void scanDayz(DzSnap& out, const char*& stage) {
                 if (e.kind != 1) continue;
                 ++survivors;
                 const auto idIt = gDzEntNetId.find(e.ptr);
-                if (idIt == gDzEntNetId.end() || !gDzRoster.count(idIt->second)) continue;
+                if (idIt == gDzEntNetId.end() || e.name.empty()) continue;
                 ++named;
                 if (sample.size() < 160) sample += (sample.empty() ? "" : ", ") + e.name;
             }
@@ -1579,13 +1623,8 @@ void scanDayz(DzSnap& out, const char*& stage) {
                     sample.c_str());
         }
 #endif
-        if (local && gDzMeName.empty()) {
-            uint32_t myId = 0;
-            if (gProc->read(uintptr_t(local + dz::kEntNetId), myId) && myId) {
-                const auto nmIt = gDzRoster.find(myId);
-                if (nmIt != gDzRoster.end()) gDzMeName = nmIt->second;
-            }
-        }
+        const auto own = resolvedNames.find(local);
+        if (own != resolvedNames.end()) gDzMeName = own->second;
     }
 
     if (now - gDzServerTick >= 5000) {
@@ -1740,7 +1779,8 @@ void scanDayz(DzSnap& out, const char*& stage) {
         }
 #endif
     }
-    out.meName = gDzMeName;
+    const auto ownName = resolvedNames.find(local);
+    out.meName = ownName != resolvedNames.end() ? ownName->second : std::string();
     out.online = gDzOnline;
 
     gDzWorldPub.store(world, std::memory_order_relaxed);
@@ -2037,7 +2077,7 @@ void dzLootPass(uint64_t world) {
                 list.push_back(std::move(li));
             }
         }
-        if (readEvents || readStashLoot || readCoveredVehicles) {
+        if (readEvents || readStashLoot || readCoveredVehicles || readHighValues) {
             std::optional<radar_event::Point> observer;
             if (readEvents) {
                 std::lock_guard<std::mutex> lock(gDzSnapMx);
@@ -2093,13 +2133,13 @@ void dzLootPass(uint64_t world) {
                 const auto type = nearbyTypes.find(ptr);
                 if (type == nearbyTypes.end()) continue;
                 const bool event = readEvents && type->second.event.has_value();
-                const bool mapType = (readStashLoot && type->second.category == loot::Stash) ||
-                                     (readCoveredVehicles && type->second.category == loot::CoveredVehicle);
+                const bool mapType = loot::mapSourceCategory(type->second.category,
+                    readStashLoot, readCoveredVehicles, readHighValues);
                 const bool mapLoot = mapType &&
                     (!gDzLootPos.count(ptr) || std::find(lslots.begin(), lslots.end(), ptr) == lslots.end());
                 if ((event || mapLoot) && std::none_of(confirmed.begin(), confirmed.end(),
                         [ptr](const NearbyRead& entry) { return entry.ptr == ptr; })) confirmed.push_back({ptr, mapLoot});
-                if (confirmed.size() == radar_event::kMaxMarkers) break;
+                if (confirmed.size() == webmap::kStashLootLimit) break;
             }
             if (!confirmed.empty()) {
                 std::vector<uint64_t> visual(confirmed.size());
@@ -2419,8 +2459,8 @@ void projectDz(const DzSnap& snap, const dz::Cam& view, const Vec3& me) {
             if (!std::isfinite(p.x) || std::fabs(p.x) > 50000 || std::fabs(p.z) > 50000) continue;
             const float dx = p.x - me.x, dy = p.y - me.y, dzz = p.z - me.z;
             const float dist = std::sqrt(dx * dx + dy * dy + dzz * dzz);
-            if (dist > lootRange && it.cat != LC_Rare) continue;
-            if (dist > range) continue;
+            if (dist > loot::effectiveRange(it.cat, lootRange) && it.cat != LC_Rare) continue;
+            if (dist > loot::effectiveRange(it.cat, range)) continue;
             if (gSettings.dzLootValuables && !whitelist && !loot::valuable(it.cat)) continue;
             if (!loot::visible(gSettings.dzLootCats, it.cat, it.name)) continue;
             float sx, sy;
@@ -2744,6 +2784,7 @@ void publishWebmap(const DzSnap& snap, const Vec3* heading) {
             if (d.cat == loot::HighValue) {
                 if (shareHighValues && highValues < 512) {
                     add(d.pos.x, d.pos.z, radar::Icon::Loot, d.cat);
+                    frame.dots.back().label = d.name; // Internal type; only Bitcoin's flag goes on the wire.
                     ++highValues;
                 }
             } else if (d.cat == loot::CoveredVehicle) {
@@ -2838,6 +2879,7 @@ bool drawDayzFrame() {
                     gDzTriggerRegions.push_back(c);
                 }
             }
+            trigger::removeFriends(gDzTriggerRegions);
             trigger::update(gDzTriggerRegions, ccx, ccy, true);
             static std::string lastRxSeen;
             if (trigger::cfg().showDebug && trigger::live().lastRx != lastRxSeen) {
@@ -3149,7 +3191,9 @@ float drawRadarView(Canvas& cv, const RECT& area, const Vec3& c, float R, bool f
             const int cell = highlighted ? entCell : lootCell;
             hs = 7 * cell / 2 + 1;
             if (px - hs < l || px + hs >= r || py - hs < t || py + hs >= b) continue;
-            drawDzIcon(cv, kIconLoot[std::clamp(p.kind - 10, 0, ::loot::Count - 1)], px, py, cell, col);
+            static constexpr DzIcon bitcoinIcon{".#.#...", ".#####.", ".#.#..#", ".#####.", ".#.#..#", ".#####.", ".#.#..."};
+            const bool bitcoin = p.kind == 10 + ::loot::HighValue && p.name && ::loot::bitcoin(*p.name);
+            drawDzIcon(cv, bitcoin ? bitcoinIcon : kIconLoot[std::clamp(p.kind - 10, 0, ::loot::Count - 1)], px, py, cell, col);
         } else {
             const int s = std::max(2, (full ? 2 : 1) * entCell + 1);
             const int w2 = p.kind == 4 ? s + 2 : s;
@@ -3440,6 +3484,7 @@ void stopEsp() {
     gDzEntPosUs.clear();
     gDzEntFwd.clear();
     gDzWebTrackIds.clear();
+    gDzWebTrackNetIds.clear();
     gDzEntName.clear();
     gDzEntChain.clear();
     gDzEntJointOfs.clear();

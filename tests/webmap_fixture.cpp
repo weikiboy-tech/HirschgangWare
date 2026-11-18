@@ -1,7 +1,9 @@
 #include "../src/webmap_state.h"
+#include "../src/player_identity.h"
 
 #include <atomic>
 #include <cassert>
+#include <cstring>
 #include <iostream>
 #include <thread>
 
@@ -91,16 +93,69 @@ std::shared_ptr<const radar_corpse::Markers> corpseScenario() {
 }
 
 int main(int argc, char** argv) {
+    {
+        using namespace player_identity;
+        Names roster{{1, "Friend"}, {2, "Opponent"}};
+        auto matched = resolve(roster, {{100, 1}, {200, 2}});
+        assert(matched.at(100) == "Friend" && matched.at(200) == "Opponent");
+        // Same object address, new network identity: never reuse the old name.
+        assert(resolve(roster, {{100, 2}}).at(100) == "Opponent");
+        assert(resolve(roster, {{100, 0}}).empty());
+        assert(resolve(roster, {{100, 3}}).empty());
+        assert(resolve({}, {{100, 1}}).empty());
+        assert(resolve(roster, {{100, 1}, {200, 1}}).empty());
+        assert(resolve({{1,"Friend"},{2,"friend"}}, {{100,1},{200,2}}).empty());
+        std::unordered_set<uint32_t> conflicts;
+        Names rows;
+        insert(rows, conflicts, 1, "Friend");
+        insert(rows, conflicts, 1, "Opponent");
+        insert(rows, conflicts, 1, "Friend");
+        assert(rows.empty());
+        for (const auto* name : {"7", "1234", "A", "M\xc3\xbcller"})
+            assert(text(reinterpret_cast<const uint8_t*>(name), std::strlen(name)+1) == name);
+        const uint8_t truncated[]{'F','r','i','e','n','d'};
+        const uint8_t broken[]{'F',0xc3,0};
+        const uint8_t control[]{'F',1,0};
+        assert(text(truncated, sizeof truncated).empty());
+        assert(text(broken, sizeof broken).empty());
+        assert(text(control, sizeof control).empty());
+    }
+    for (const auto cat : {loot::Bag, loot::VehicleKey, loot::Stash, loot::CoveredVehicle, loot::HighValue}) {
+        assert(loot::mapSourceCategory(cat, true, true, true));
+        assert(!loot::mapSourceCategory(cat, false, false, false));
+        assert(loot::effectiveRange(cat, 50.f) == 1000.f);
+        assert(loot::effectiveRange(cat, 150.f) == 1000.f);
+        assert(loot::effectiveRange(cat, 200.f) == 1000.f);
+        assert(loot::effectiveRange(cat, 1000.f) == 1000.f);
+        assert(loot::effectiveRange(cat, 1500.f) == 1500.f);
+    }
+    assert(loot::mapSourceCategory(loot::Bag, true, false, false));
+    assert(loot::mapSourceCategory(loot::HighValue, false, false, true));
+    assert(!loot::mapSourceCategory(loot::Gun, true, true, true));
+    assert(!loot::mapSourceCategory(loot::HighValue, true, true, false));
+    assert(!loot::mapSourceCategory(loot::Bag, false, true, true));
+    assert(loot::effectiveRange(loot::Gun, 50.f) == 50.f);
     assert(loot::classify(loot::Other, "HuntingBag_Autumn") == loot::Bag);
+    assert(loot::bitcoin("Bitcoin") && loot::bitcoin("GZ_Bitcoin"));
+    for (const auto* name : {"BitcoinMining_Kit", "GZ_Bitcoin_Kit", "GZEFT_LEDX", "gz_diamond"})
+        assert(!loot::bitcoin(name));
     assert(loot::classify(loot::Other, "ExpansionCarKey_Red") == loot::VehicleKey);
     assert(loot::classify(loot::Other, "UndergroundStash") == loot::Stash);
     assert(loot::classify(loot::Other, "HiddenStash") == loot::Stash);
-    for (const auto* name : {"GZ_Bitcoin", "Bitcoin", "gz_diamond", "GZEFT_LEDX", "Videocard_BL3080",
-                             "GZEFT_HVGoldenPendant", "GZ_XM2010"})
+    for (const auto* name : {"GZ_Bitcoin", "Bitcoin", "GZEFT_LEDX", "Videocard_BL3080",
+                             "GZEFT_HVGoldenPendant"})
         assert(loot::classify(loot::Other, name) == loot::HighValue);
     for (const auto* name : {"BitcoinMining_Kit", "GZBM_PowerSupplyUnit", "BBP_Carpet_DiamondPlate",
-                             "CigarettePack_Merkur", "M4A1", "gz_diamond_fake"})
+                             "CigarettePack_Merkur", "M4A1", "gz_diamond_fake", "GZ_XM2010",
+                             "IMP_Vest_6B43N_Black", "GZ_WorkBench_Black_Kit", "CP_CannabisBrickSkunk",
+                             "collectable_usb", "gz_diamond", "Videocard_BL2060", "GZEFT_HVLargePainting_1"})
         assert(loot::classify(loot::Other, name) != loot::HighValue);
+    for (const auto* name : {"DuffelBagSmall_Camo", "DuffleBag", "GZ_DuffelBag_Black", "GZ_DuffleBag"})
+        assert(loot::classify(loot::Other, name) == loot::Bag);
+    for (const auto* name : {"GZ_Safe", "GZ_Safe_Black", "Safe", "HiddenStash_Small"})
+        assert(loot::classify(loot::Other, name) == loot::Stash);
+    for (const auto* name : {"SafeKey", "SafeZone", "Safe_Zone", "GZ_Safe_Kit", "GZ_Safe_Key", "SafeCrackerTool"})
+        assert(loot::classify(loot::Other, name) != loot::Stash);
     assert(loot::mapVisible(false, 0, 0, loot::HighValue, "GZEFT_LEDX", true));
     assert(!loot::mapVisible(true, loot::kAll, 0, loot::HighValue, "GZEFT_LEDX", false));
     for (const auto* name : {"Motorbike_Red_Cover", "Motorbike_COVER", "OffroadHatchback_Blue_Cover",

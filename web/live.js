@@ -78,7 +78,8 @@ export function decode(raw) {
       continue;
     }
     if (key === "highValues") {
-      safe.highValues = dots.map(({x, z}) => ({x, z}));
+      if (!dots.every(p => p.bitcoin === undefined || typeof p.bitcoin === "boolean")) return null;
+      safe.highValues = dots.map(({x, z, bitcoin}) => ({x, z, ...(bitcoin === true ? {bitcoin:true} : {})}));
       continue;
     }
     const playerIds = new Set();
@@ -104,7 +105,8 @@ export function decode(raw) {
     name: shortText(p.me.name), held: shortText(p.me.held), health: validHealth(p.me.health) ? p.me.health : undefined };
   const heldShared = typeof p.heldShared === "boolean" ? p.heldShared : undefined;
   const healthShared = typeof p.healthShared === "boolean" ? p.healthShared : undefined;
-  return { live: p.live, map: p.map, me, layers: safe, heldShared, healthShared };
+  const namesShared = typeof p.namesShared === "boolean" ? p.namesShared : undefined;
+  return { live: p.live, map: p.map, me, layers: safe, heldShared, healthShared, namesShared };
 }
 
 export class CorpseVisibility {

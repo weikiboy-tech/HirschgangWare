@@ -30,9 +30,11 @@ SOCKET gSock = INVALID_SOCKET;
 sockaddr_in gAddr{};
 bool gWsa = false;
 bool gCapture = false;
-bool gWaitForBoundRelease = false;
+std::array<bool, 2> gWaitForBoundRelease{};
+int gCaptureSlot = 0;
 bool gCaptureArmed = false;
 ULONGLONG gLastBindAt = 0;
+ULONGLONG gLastEscapeCancelAt = 0;
 void (*gLog)(const char*) = nullptr;
 std::string gIdent;
 bool gAwaitIdent = false;
@@ -44,6 +46,7 @@ uint8_t gFrameCmd = 0;
 uint16_t gFrameLen = 0, gFrameGot = 0;
 uint8_t gFrameBuf[96] = {};
 int gKeyHid = 0;  // HID usage of the last key event from the box
+std::array<bool, 256> gBoxHidDown{};
 ULONGLONG gLastStreamOn = 0;
 bool gStreamLost = false;
 
@@ -128,12 +131,14 @@ void setStatus(const std::string& s) {
 
 void bindKey(int key, int hid, InputSource source);
 
-bool boxInputEnabled() {
-    return gCfg.keySource == InputSource::Box ||
-           (gCfg.keySource == InputSource::Legacy && !gCfg.keyRemote && gCfg.keyFromDevice);
+bool boxInputEnabled(int slot = 0) {
+    const auto b = binding(slot);
+    return bindableKey(b.key) && (b.source == InputSource::Box ||
+           (b.source == InputSource::Legacy && !gCfg.keyRemote && gCfg.keyFromDevice));
 }
 
 void captureBox(int key, int hid) {
+    if (gCapture && key == VK_ESCAPE) { cancelCaptureEscape(); return; }
     if (gCapture && gCaptureArmed && gCfg.keyFromDevice && !remoteKeysReady() &&
         ((key >= 1 && key <= 5) || dma_keyboard::validKey(unsigned(key))))
         bindKey(key, hid, InputSource::Box);
@@ -225,10 +230,11 @@ int vkToHid(int vk) {
 }
 
 void bindKey(int vk, int hid, InputSource source) {
-    gCfg.key = vk;
-    gCfg.keyHid = hid;
-    gCfg.keySource = source;
-    gWaitForBoundRelease = true;
+    if (vk == VK_ESCAPE) { cancelCaptureEscape(); return; }
+    if (!bindableKey(vk)) return;
+    if (gCaptureSlot == 1) gCfg.secondary = {vk, hid, source};
+    else { gCfg.key = vk; gCfg.keyHid = hid; gCfg.keySource = source; }
+    gWaitForBoundRelease[size_t(gCaptureSlot)] = true;
     gCapture = false;
     gLive.note = "bound";
     gLastBindAt = GetTickCount64();
@@ -249,6 +255,9 @@ void handleFrame(uint8_t cmd, const uint8_t* pl, uint16_t len) {
     const uint8_t kind = pl[0], id = pl[1], st = pl[2];
     if (id == 0xFF && st == 0xFF) {
         gStreamLost = true;
+        gBoxHidDown.fill(false);
+        std::fill(std::begin(gBtn), std::end(gBtn), false);
+        gKeyHeld = false;
         tlog("[trg] input stream lost (kind %u)", kind);
         return;
     }
@@ -260,6 +269,7 @@ void handleFrame(uint8_t cmd, const uint8_t* pl, uint16_t len) {
         if (st == 1) captureBox(b, 0);
         tlog("[trg] box button %d %s", b, st ? "down" : "up");
     } else if (kind == 2) {
+        gBoxHidDown[id] = st == 1;
         gKeyHid = id;
         gKeyHeld = st == 1;
         if (st == 1) captureBox(hidToVk(id), id);
@@ -481,6 +491,9 @@ std::vector<std::string> portsImpl() {
 }
 
 void closeDevice() {
+    gBoxHidDown.fill(false);
+    std::fill(std::begin(gBtn), std::end(gBtn), false);
+    gKeyHeld = false;
     if (gSerial != INVALID_HANDLE_VALUE) {
         CloseHandle(gSerial);
         gSerial = INVALID_HANDLE_VALUE;
@@ -617,6 +630,13 @@ void load() {
         else if (k == "keyfromlocal") gCfg.keyFromLocal = toBool(v, gCfg.keyFromLocal);
         else if (k == "keyremote") gCfg.keyRemote = toBool(v, gCfg.keyRemote);
         else if (k == "keyhid") gCfg.keyHid = toInt(v, gCfg.keyHid);
+        else if (k == "secondkey") gCfg.secondary.key = toInt(v, 0);
+        else if (k == "secondkeyhid") gCfg.secondary.hid = toInt(v, 0);
+        else if (k == "secondkeysource") {
+            if (v == "main") gCfg.secondary.source = InputSource::MainPc;
+            else if (v == "box") gCfg.secondary.source = InputSource::Box;
+            else gCfg.secondary.source = InputSource::SecondPc;
+        }
         else if (k == "usebinary") gCfg.useBinary = toBool(v, gCfg.useBinary);
         else if (k == "delayms") gCfg.delayMs = toInt(v, gCfg.delayMs);
         else if (k == "radiuspx") gCfg.radiusPx = toInt(v, gCfg.radiusPx);
@@ -643,6 +663,8 @@ void load() {
         else if (k == "showregions") gCfg.showRegions = toBool(v, gCfg.showRegions);
     }
     if (gCfg.delayMs < 0) gCfg.delayMs = 0;
+    if (!bindableKey(gCfg.key)) { gCfg.key = 0; gCfg.keyHid = 0; }
+    if (!bindableKey(gCfg.secondary.key)) gCfg.secondary = {};
     gCfg.radiusPx = std::clamp(gCfg.radiusPx, 0, 4);
     if (!sawCmdMonitor) gCfg.cmdMonitor = monitorPresetText(gCfg.monitorIdx);
     if (GetFileAttributesA(iniPath().c_str()) == INVALID_FILE_ATTRIBUTES) save();
@@ -667,6 +689,10 @@ void save() {
     f << "keyFromLocal=" << (gCfg.keyFromLocal ? 1 : 0) << "\n";
     f << "keyRemote=" << (gCfg.keyRemote ? 1 : 0) << "\n";
     f << "keyHid=" << gCfg.keyHid << "\n";
+    f << "secondKey=" << gCfg.secondary.key << "\n";
+    f << "secondKeyHid=" << gCfg.secondary.hid << "\n";
+    f << "secondKeySource=" << (gCfg.secondary.source == InputSource::MainPc ? "main" :
+        gCfg.secondary.source == InputSource::Box ? "box" : "second") << "\n";
     f << "useBinary=" << (gCfg.useBinary ? 1 : 0) << "\n";
     f << "delayMs=" << gCfg.delayMs << "\n";
     f << "radiusPx=" << gCfg.radiusPx << "\n";
@@ -699,15 +725,17 @@ int keyToVk(int key) {
     return dma_keyboard::validKey(unsigned(key)) ? key : 0;
 }
 
+bool (*gLocalKeyReader)(int) = nullptr;
 bool localKeyDown(int key) {
+    if (gLocalKeyReader) return gLocalKeyReader(key);
     const int vk = keyToVk(key);
     return vk && (GetAsyncKeyState(vk) & 0x8000) != 0;
 }
 
-bool deviceKeyDown(int key) {
+bool deviceKeyDown(int key, int hid, bool primary = false) {
     if (key >= 1 && key <= 5) return gBtn[key];
-    if (gCfg.useBinary) return gKeyHeld && gCfg.keyHid != 0 && gKeyHid == gCfg.keyHid;
-    return gKeyHeld && (gKeyCode == 0 || gKeyCode == key);
+    if (gCfg.useBinary) return hid > 0 && hid < 256 && gBoxHidDown[size_t(hid)];
+    return gKeyHeld && ((primary && gKeyCode == 0) || gKeyCode == key);
 }
 
 void pollKey() {
@@ -715,6 +743,16 @@ void pollKey() {
 }
 
 Config& cfg() { return gCfg; }
+Binding binding(int slot) { return slot == 1 ? gCfg.secondary : Binding{gCfg.key, gCfg.keyHid, gCfg.keySource}; }
+int captureSlot() { return gCapture ? gCaptureSlot : -1; }
+void clearBinding(int slot) {
+    if (slot != 0 && slot != 1) return;
+    if (slot == 1) gCfg.secondary = {};
+    else { gCfg.key = 0; gCfg.keyHid = 0; }
+    gLive.boundHeld[size_t(slot)] = false;
+    if (gCapture && gCaptureSlot == slot) stopCapture();
+    touch();
+}
 Live& live() { return gLive; }
 const std::string& status() { return gStatus; }
 bool connected() { return gSerial != INVALID_HANDLE_VALUE || gSock != INVALID_SOCKET; }
@@ -745,12 +783,21 @@ void monitorPreset(int i) {
     tlog("[trg] sent monitor: %s", gCfg.cmdMonitor.c_str());
 }
 bool justBound() { return gLastBindAt != 0 && GetTickCount64() - gLastBindAt < 450; }
-void startCapture() {
+void startCapture(int slot) {
+    if (slot != 0 && slot != 1) return;
+    gCaptureSlot = slot;
     gCapture = true;
     gCaptureArmed = false;
     gLive.note = "press a key or mouse button on either PC";
 }
-void stopCapture() { gCapture = false; gLive.note.clear(); }
+void stopCapture() { gCapture = false; gWaitForBoundRelease.fill(true); gLive.note.clear(); }
+bool cancelCaptureEscape() {
+    const auto now = GetTickCount64();
+    if (!gCapture && (!gLastEscapeCancelAt || now - gLastEscapeCancelAt >= 450)) return false;
+    gLastEscapeCancelAt = now;
+    stopCapture();
+    return true;
+}
 void touch() { gDirty = true; gDirtyAt = GetTickCount64(); }
 std::vector<std::string> listPorts() { return portsImpl(); }
 void connectDevice() { openDevice(); }
@@ -773,9 +820,10 @@ dma_keyboard::Sample gRemote;
 dma_keyboard::Bitmap gRemoteInitiallyDown;
 ULONGLONG gRemoteAt = 0;
 
-bool usesRemote() {
-    return gCfg.keySource == InputSource::MainPc ||
-           (gCfg.keySource == InputSource::Legacy && gCfg.keyRemote);
+bool usesRemote(int slot) {
+    const auto b = binding(slot);
+    return bindableKey(b.key) && (b.source == InputSource::MainPc ||
+           (b.source == InputSource::Legacy && gCfg.keyRemote));
 }
 
 bool remoteDown(int key) {
@@ -789,7 +837,7 @@ bool remoteInitiallyDown(int key) {
 }
 
 void sampleRemote(ULONGLONG now) {
-    if (!gRemoteKeys || (!gCapture && !usesRemote())) {
+    if (!gRemoteKeys || (!gCapture && !usesRemote(0) && !usesRemote(1))) {
         gRemote = {};
         gRemoteAt = 0;
         return;
@@ -818,6 +866,10 @@ int firstBinding(IsDown down) {
 
 bool captureInputs() {
     if (!gCapture) return false;
+    if (localKeyDown(VK_ESCAPE) || remoteDown(VK_ESCAPE)) {
+        cancelCaptureEscape();
+        return true;
+    }
     const int local = firstBinding(localKeyDown);
     if (!gCaptureArmed) {
         const int remote = firstBinding(remoteDown);
@@ -835,37 +887,55 @@ bool captureInputs() {
     return true;
 }
 
-bool remoteMouseSettling(ULONGLONG now) {
+bool remoteMouseSettling(ULONGLONG now, int slot) {
     // Only the left-button binding can be fed back by our synthetic left click.
-    return usesRemote() && gCfg.key == 1 &&
+    return usesRemote(slot) && binding(slot).key == 1 &&
            (gDownAt || (gOutputReleasedAt && now - gOutputReleasedAt < 40));
 }
 
-bool boundDown() {
-    if (usesRemote()) return remoteDown(gCfg.key) && !remoteInitiallyDown(gCfg.key);
-    if (gCfg.keySource == InputSource::SecondPc) return localKeyDown(gCfg.key);
-    return (gCfg.keySource == InputSource::Legacy && gCfg.keyFromLocal && localKeyDown(gCfg.key)) ||
-           (connected() && boxInputEnabled() && deviceKeyDown(gCfg.key));
+bool remoteMouseSettling(ULONGLONG now) {
+    bool any = false;
+    for (int slot = 0; slot < 2; ++slot) {
+        if (!gLive.boundHeld[size_t(slot)]) continue;
+        if (!remoteMouseSettling(now, slot)) return false;
+        any = true;
+    }
+    return any;
+}
+
+bool boundDown(int slot) {
+    const auto b = binding(slot);
+    if (!bindableKey(b.key)) return false;
+    if (usesRemote(slot)) return remoteDown(b.key) && !remoteInitiallyDown(b.key);
+    if (b.source == InputSource::SecondPc) return localKeyDown(b.key);
+    return (b.source == InputSource::Legacy && gCfg.keyFromLocal && localKeyDown(b.key)) ||
+           (connected() && boxInputEnabled(slot) && deviceKeyDown(b.key, b.hid, slot == 0));
 }
 
 }  // namespace
 
 void setRemoteKeys(dma_keyboard::Sample (*fn)()) { gRemoteKeys = fn; }
+void setLocalKeyReader(bool (*fn)(int)) { gLocalKeyReader = fn; }
 
 void pollInputs() {
     const ULONGLONG now = GetTickCount64();
-    const bool settling = remoteMouseSettling(now);
-    if (!settling) sampleRemote(now);
+    sampleRemote(now);
     if (captureInputs()) {
         gLive.keyHeld = false;
+        gLive.boundHeld.fill(false);
         return;
     }
-    const bool held = settling ? gRemote.pid && gLive.keyHeld : boundDown();
-    if (gWaitForBoundRelease && !held) gWaitForBoundRelease = false;
-    const bool activated = held && !gWaitForBoundRelease;
+    for (int slot = 0; slot < 2; ++slot) {
+        const bool rawHeld = boundDown(slot);
+        const bool held = remoteMouseSettling(now, slot) ? gRemote.pid && gLive.boundHeld[size_t(slot)] : rawHeld;
+        if (gWaitForBoundRelease[size_t(slot)] && !rawHeld) gWaitForBoundRelease[size_t(slot)] = false;
+        gLive.boundHeld[size_t(slot)] = held && !gWaitForBoundRelease[size_t(slot)];
+    }
+    const bool activated = gLive.boundHeld[0] || gLive.boundHeld[1];
     if (activated && !gLive.keyHeld) {
         ++gLive.keyPresses;
-        tlog("[trg] %s key=%d total=%llu", keySourceLabel(), gCfg.key,
+        const int slot = gLive.boundHeld[0] ? 0 : 1;
+        tlog("[trg] %s bind=%d key=%d total=%llu", keySourceLabel(slot), slot + 1, binding(slot).key,
              static_cast<unsigned long long>(gLive.keyPresses));
     }
     gLive.keyHeld = activated;
@@ -873,10 +943,10 @@ void pollInputs() {
 
 bool remoteKeysReady() { return gRemote.pid != 0; }
 
-const char* keySourceLabel() {
-    if (usesRemote()) return "Main PC";
-    if (gCfg.keySource == InputSource::SecondPc) return "Second PC";
-    if (gCfg.keySource == InputSource::Box) return "Box";
+const char* keySourceLabel(int slot) {
+    if (usesRemote(slot)) return "Main PC";
+    if (binding(slot).source == InputSource::SecondPc) return "Second PC";
+    if (binding(slot).source == InputSource::Box) return "Box";
     return "Local / box";
 }
 

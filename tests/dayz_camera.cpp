@@ -40,6 +40,10 @@ void testBodyRegions() {
             const trigger_geometry::Viewport viewport{7,9,float(size.first+7),float(size.second+9)};
             trigger_geometry::appendBody(view,viewport,body,1000000,1001000,identity,regions);
             assert(regions.size()==16);
+            auto friendRegions = regions;
+            for (auto& region : friendRegions) region.isFriend = true;
+            trigger::removeFriends(friendRegions);
+            assert(friendRegions.empty() && regions.size() == 16);
             const auto matches = [&](Vec3 world) {
                 float x,y;
                 assert(toScreen(view,world,float(size.first),float(size.second),x,y));
@@ -56,9 +60,17 @@ void testBodyRegions() {
             assert(!matches({.6f,1.2f,10})); // High legacy radii cannot inflate regions.
             config.radiusPx=0;
             assert(matches({0,1.35f,10}));
+            config.hitMask=trigger::H_Spine | trigger::H_Pelvis;
+            for (const float height : {1.35f, 1.05f}) {
+                assert(matches({.145f,height,10}));
+                assert(matches({-.145f,height,10}));
+                assert(!matches({.17f,height,10}));
+                assert(!matches({-.17f,height,10}));
+            }
             config.hitMask=trigger::H_Head;
             assert(!matches({0,1.35f,10}));
             assert(matches({0,1.7f,10}));
+            assert(!matches({.11f,1.7f,10})); // Head radius is unchanged.
             config.hitMask=trigger::H_All;
             config.radiusPx=4;
         }
@@ -108,7 +120,130 @@ void testBodyRegions() {
     assert(!trigger::targetAt(config,regions,x,y).candidate);
 }
 
+namespace {
+dma_keyboard::Sample inputSample;
+std::array<bool, 256> localInput{};
+dma_keyboard::Sample remoteInput() { return inputSample; }
+bool localInputDown(int key) { return key > 0 && key < 256 && localInput[size_t(key)]; }
+void remoteKey(int vk, bool down) {
+    const uint8_t bit = uint8_t(1u << (2 * (unsigned(vk) % 4)));
+    auto& byte = inputSample.bits[size_t(vk) / 4];
+    if (down) byte |= bit; else byte &= uint8_t(~bit);
+}
+// GetTickCount64 can have a ~16 ms tick in the isolated test process.
+// Give the production 8 ms sample gate a complete tick between snapshots.
+void inputStep() { Sleep(25); trigger::pollInputs(); }
+int inputVk(int key) {
+    constexpr int buttons[]{0, VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2};
+    return key > 0 && key <= 5 ? buttons[key] : key;
+}
+}
+
+void testIndependentBindings() {
+    trigger::cfg() = {};
+    auto& cfg = trigger::cfg();
+    cfg.autoConnect = false;
+    cfg.key = 'E'; cfg.keySource = trigger::InputSource::MainPc;
+    cfg.secondary = {5, 0, trigger::InputSource::SecondPc};
+    trigger::setRemoteKeys(remoteInput);
+    trigger::setLocalKeyReader(localInputDown);
+    inputSample = {}; inputSample.pid = 42;
+    inputStep();
+    localInput['E'] = true; inputStep();
+    assert(!trigger::live().keyHeld); // Same key on the wrong PC is isolated.
+    localInput['E'] = false;
+    remoteKey('E', true); inputStep();
+    assert(trigger::live().keyHeld && trigger::live().boundHeld[0]);
+    localInput[5] = true; inputStep();
+    assert(trigger::live().boundHeld[0] && trigger::live().boundHeld[1]);
+    remoteKey('E', false); inputStep();
+    assert(trigger::live().keyHeld && !trigger::live().boundHeld[0]);
+    localInput[5] = false; inputStep();
+    assert(!trigger::live().keyHeld);
+    localInput[5] = true; inputStep();
+    assert(trigger::live().keyHeld && trigger::live().boundHeld[1]);
+    localInput.fill(false); inputStep();
+    // Identical keys on separate PCs remain independent, with OR semantics.
+    cfg.key = 'E'; cfg.keySource = trigger::InputSource::MainPc;
+    cfg.secondary = {'E', 0, trigger::InputSource::SecondPc};
+    remoteKey('E', true); localInput['E'] = true; inputStep();
+    assert(trigger::live().boundHeld[0] && trigger::live().boundHeld[1]);
+    localInput['E'] = false; inputStep();
+    assert(trigger::live().keyHeld && trigger::live().boundHeld[0] && !trigger::live().boundHeld[1]);
+    localInput['E'] = true; inputSample.pid = 0; inputStep();
+    assert(trigger::live().keyHeld && !trigger::live().boundHeld[0] && trigger::live().boundHeld[1]);
+    localInput.fill(false); inputSample.pid = 42; inputSample.bits = {}; inputStep();
+    // Either slot can use either PC, including every supported mouse button.
+    for (int slot = 0; slot < 2; ++slot) {
+        for (const auto source : {trigger::InputSource::MainPc, trigger::InputSource::SecondPc}) {
+            for (const int key : std::array<int, 6>{'W', 1, 2, 3, 4, 5}) {
+                cfg.key = 0; cfg.secondary = {};
+                if (slot) cfg.secondary = {key, 0, source};
+                else { cfg.key = key; cfg.keySource = source; }
+                inputStep();
+                if (source == trigger::InputSource::MainPc) remoteKey(inputVk(key), true);
+                else localInput[size_t(key)] = true;
+                inputStep();
+                if (!trigger::live().keyHeld || !trigger::live().boundHeld[size_t(slot)])
+                    std::fprintf(stderr,"binding input failed: slot=%d source=%d key=%d remote=%d\n",slot,int(source),key,int(trigger::remoteKeysReady()));
+                assert(trigger::live().keyHeld && trigger::live().boundHeld[size_t(slot)]);
+                inputSample.bits = {}; localInput.fill(false); inputStep();
+                assert(!trigger::live().keyHeld);
+            }
+        }
+    }
+    // A held key on a newly attached session is not a new press.
+    cfg.key = 'E'; cfg.keySource = trigger::InputSource::MainPc; cfg.secondary = {};
+    inputSample.pid = 43; remoteKey('E', true); inputStep();
+    assert(!trigger::live().keyHeld);
+    remoteKey('E', false); inputStep(); remoteKey('E', true); inputStep();
+    assert(trigger::live().keyHeld);
+    inputSample.pid = 0; inputStep();
+    assert(!trigger::live().keyHeld);
+    inputSample.pid = 44; inputSample.bits = {}; inputStep();
+    cfg.secondary = {'Q', 0, trigger::InputSource::SecondPc};
+    trigger::startCapture(1); inputStep(); remoteKey('W', true); inputStep();
+    assert(!trigger::capturing() && cfg.secondary.key == 'W' && cfg.key == 'E');
+    assert(cfg.secondary.source == trigger::InputSource::MainPc && !trigger::live().keyHeld);
+    inputStep(); assert(!trigger::live().keyHeld); // Must release a newly bound key first.
+    remoteKey('W', false); inputStep(); remoteKey('W', true); inputStep();
+    assert(trigger::live().keyHeld); remoteKey('W', false); inputStep();
+    // Esc cancels even before the capture is armed, and keeps both old bindings.
+    for (int slot = 0; slot < 2; ++slot) {
+        trigger::startCapture(slot); localInput[VK_ESCAPE] = true; inputStep();
+        assert(!trigger::capturing() && cfg.key == 'E' && cfg.secondary.key == 'W');
+        assert(trigger::cancelCaptureEscape()); // Window keydown/repeat is consumed after polling cancellation.
+        localInput.fill(false); inputStep();
+        trigger::startCapture(slot); inputStep(); remoteKey(VK_ESCAPE, true); inputStep();
+        assert(!trigger::capturing() && cfg.key == 'E' && cfg.secondary.key == 'W');
+        remoteKey(VK_ESCAPE, false); inputStep();
+    }
+    trigger::clearBinding(1); trigger::startCapture(1);
+    localInput[VK_ESCAPE] = true; inputStep();
+    assert(!trigger::capturing() && cfg.secondary.key == 0 && cfg.key == 'E');
+    localInput.fill(false); inputStep();
+    // Local keyboard and both mice are recognized by capture, too.
+    for (const int key : std::array<int, 5>{'F', 2, 3, 4, 5}) {
+        trigger::startCapture(1); inputStep(); localInput[size_t(key)] = true; inputStep();
+        assert(cfg.secondary.key == key && cfg.secondary.source == trigger::InputSource::SecondPc);
+        localInput.fill(false); inputStep();
+        trigger::startCapture(1); inputStep(); remoteKey(inputVk(key), true); inputStep();
+        assert(cfg.secondary.key == key && cfg.secondary.source == trigger::InputSource::MainPc);
+        inputSample.bits = {}; inputStep();
+    }
+    cfg.key = 'E'; cfg.keySource = trigger::InputSource::MainPc;
+    cfg.secondary = {'W', 0, trigger::InputSource::SecondPc};
+    trigger::save(); cfg = {}; trigger::load();
+    assert(cfg.key == 'E' && cfg.keySource == trigger::InputSource::MainPc);
+    assert(cfg.secondary.key == 'W' && cfg.secondary.source == trigger::InputSource::SecondPc);
+    cfg.key = VK_ESCAPE; cfg.secondary.key = VK_ESCAPE; trigger::save(); cfg = {}; trigger::load();
+    assert(cfg.key == 0 && cfg.secondary.key == 0 && !trigger::bindableKey(VK_ESCAPE));
+    inputStep(); trigger::setRemoteKeys(nullptr); trigger::setLocalKeyReader(nullptr);
+    cfg = {}; trigger::live() = {};
+}
+
 int main() {
+    testIndependentBindings();
     testBodyRegions();
     const uint64_t sample = 1000000;
     assert(overlay_motion::leadSeconds(0, sample) == 0.f);
@@ -349,9 +484,32 @@ int main() {
         Sleep(1);
     }
     assert(!live.target && live.clicks==5);
+    area.isFriend = true;
+    std::vector<trigger::Cand> friendOnly{area};
+    trigger::removeFriends(friendOnly);
+    assert(friendOnly.empty());
+    for (int i = 0; i < 40; ++i) {
+        trigger::update(friendOnly,639.5f,359.5f,true);
+        Sleep(1);
+    }
+    assert(live.keyHeld && !live.target && live.clicks == 5);
+    FD_ZERO(&readSet); FD_SET(receiver, &readSet);
+    assert(select(0,&readSet,nullptr,nullptr,&immediate) == 0);
+    area.isFriend = false;
+    std::vector<trigger::Cand> enemies{area};
+    trigger::removeFriends(enemies);
+    assert(enemies.size() == 1);
+    trigger::update(enemies,639.5f,359.5f,true);
+    receive(output.cmdDown);
+    // Marking the target as a friend removes it from the following frame.
+    enemies[0].isFriend = true;
+    trigger::removeFriends(enemies);
+    trigger::update(enemies,639.5f,359.5f,true);
+    receive(output.cmdUp);
+    assert(!live.target && live.clicks == 6);
     output.cmdDown.clear();
     trigger::clickOnce();
-    assert(live.clicks == 5 && !live.clickStatus.empty());
+    assert(live.clicks == 6 && !live.clickStatus.empty());
     trigger::disconnectDevice();
     closesocket(receiver);
     WSACleanup();

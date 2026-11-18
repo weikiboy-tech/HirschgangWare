@@ -78,7 +78,7 @@ constexpr COLORREF Survivor = RGB(255, 60, 60), Infected = RGB(255, 160, 40), An
 
 constexpr float kSide = 288.f;
 
-enum { kGlyphPerson = 100, kGlyphPaw, kGlyphCar };
+enum { kGlyphPerson = 100, kGlyphPaw, kGlyphCar, kGlyphBitcoin };
 
 HWND gWnd = nullptr;
 ComPtr<ID3D11Device> gDev;
@@ -255,6 +255,7 @@ void setMapSampler(const ImDrawList*, const ImDrawCmd*) {
 }
 
 LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && wp == VK_ESCAPE && trigger::cancelCaptureEscape()) return 0;
     if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wp, lp)) return true;
     const bool imguiMouse = gImguiReady && ImGui::GetCurrentContext() && ImGui::GetIO().WantCaptureMouse;
     auto zoom = [](float f) { gZoom = std::clamp(int(float(gZoom) * f), 25, 8000); };
@@ -575,6 +576,14 @@ void drawGlyph(ImDrawList* dl, ImVec2 c, float s, int glyph, ImU32 col, ImU32 bg
             g.circle(-0.54f, 0.48f, 0.19f, col);
             g.circle(0.54f, 0.48f, 0.19f, col);
             break;
+        case kGlyphBitcoin:
+            g.ring(0, 0, 1.f, col, stroke * .75f);
+            g.line(-.25f, -.65f, -.25f, .65f, col, stroke * .75f);
+            g.line(-.07f, -.65f, -.07f, .65f, col, stroke * .75f);
+            g.line(-.4f, -.45f, .08f, -.45f, col, stroke * .75f);
+            dl->AddBezierCubic(g.P(.08f, -.45f), g.P(.72f, -.45f), g.P(.72f, 0), g.P(-.25f, 0), col, stroke * .75f);
+            dl->AddBezierCubic(g.P(-.25f, 0), g.P(.72f, 0), g.P(.72f, .45f), g.P(-.4f, .45f), col, stroke * .75f);
+            break;
         case loot::HighValue:
             dl->AddBezierCubic(g.P(.5f, -.48f), g.P(-.4f, -.9f), g.P(-.8f, 0), g.P(0, -.05f), col, stroke);
             dl->AddBezierCubic(g.P(0, -.05f), g.P(.8f, 0), g.P(.4f, .9f), g.P(-.5f, .48f), col, stroke);
@@ -819,7 +828,7 @@ void drawRadar(const Frame& f, Config& cfg, const Counts& n) {
                     const ImU32 col = col32(loot::info(d.cat).color);
                     if (d.cat == loot::HighValue) {
                         r = 6.f * scale;
-                        drawGlyph(dl, c, r, d.cat, col, th::Edge);
+                        drawGlyph(dl, c, r, loot::bitcoin(d.label) ? kGlyphBitcoin : d.cat, col, th::Edge);
                         break;
                     }
                     const bool rare = d.cat == loot::Rare;
@@ -1318,8 +1327,8 @@ static bool vkExtended(int vk) {
     }
 }
 
-void keyLabel(char* out, size_t n) {
-    const int k = trigger::cfg().key;
+void keyLabel(char* out, size_t n, int slot = 0) {
+    const int k = trigger::binding(slot).key;
     if (k >= 1 && k <= 5) {
         static const char* const m[6] = {"", "Left mouse", "Right mouse", "Middle mouse", "Mouse 4", "Mouse 5"};
         std::snprintf(out, n, "%s", m[k]);
@@ -1345,6 +1354,31 @@ void keyLabel(char* out, size_t n) {
     std::snprintf(out, n, "code 0x%02X (%d)", k, k);
 }
 
+void drawTriggerBindings(bool& ch, const char* scope) {
+    ImGui::PushID(scope);
+    for (int slot = 0; slot < 2; ++slot) {
+        ImGui::PushID(slot);
+        char label[160], key[64];
+        keyLabel(key, sizeof key, slot);
+        const bool capturing = trigger::captureSlot() == slot;
+        std::snprintf(label, sizeof label, capturing ? "%s: press a key (Esc cancels)##bind" : "%s: %s [bind]##bind",
+                      slot == 0 ? "Primary" : "Secondary", key);
+        if (chip(label, capturing, std::max(80.f, ImGui::GetContentRegionAvail().x - 60.f))) {
+            if (capturing) trigger::stopCapture();
+            else if (!trigger::justBound()) trigger::startCapture(slot);
+            ch = true;
+        }
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!trigger::binding(slot).key);
+        if (chip("Clear", false, 52.f)) { trigger::clearBinding(slot); ch = true; }
+        ImGui::EndDisabled();
+        ImGui::TextDisabled("%s%s", trigger::keySourceLabel(slot), trigger::live().boundHeld[size_t(slot)] ? " - HELD" : "");
+        ImGui::PopID();
+    }
+    ImGui::TextDisabled("Hold either bind. Esc cancels binding; Clear removes it.");
+    ImGui::PopID();
+}
+
 void drawTriggerSection(bool& ch) {
     trigger::Config& tc = trigger::cfg();
     section("TRIGGERBOT");
@@ -1362,15 +1396,7 @@ void drawTriggerSection(bool& ch) {
         ch = true;
     }
 
-    char lbl[80], kl[64];
-    keyLabel(kl, sizeof kl);
-    std::snprintf(lbl, sizeof lbl, trigger::capturing() ? "Press the trigger key...##tk" : "Trigger key: %s  [bind]##tk", kl);
-    if (chip(lbl, trigger::capturing(), ImGui::GetContentRegionAvail().x)) {
-        if (trigger::capturing()) trigger::stopCapture();
-        else if (!trigger::justBound()) trigger::startCapture();
-        ch = true;
-    }
-    ImGui::TextDisabled("Hold mode always on - bind by pressing the key on the gaming PC or on this PC");
+    drawTriggerBindings(ch, "main-binds");
 
     int d = tc.delayMs;
     ImGui::PushItemWidth(-1);
@@ -1467,14 +1493,7 @@ void drawTriggerWindow(bool& ch) {
         }
 
         section("TRIGGER");
-        char kl[64], lbl[128];
-        keyLabel(kl, sizeof kl);
-        std::snprintf(lbl, sizeof lbl, trigger::capturing() ? "Press the trigger key...##mk" : "Trigger key: %s - %s  [bind]##mk", trigger::keySourceLabel(), kl);
-        if (chip(lbl, trigger::capturing(), ImGui::GetContentRegionAvail().x)) {
-            if (trigger::capturing()) trigger::stopCapture();
-            else if (!trigger::justBound()) trigger::startCapture();
-            ch = true;
-        }
+        drawTriggerBindings(ch, "module-binds");
         if (tc.keySource == trigger::InputSource::Legacy) {
             bool fromRem = tc.keyRemote;
             if (switchRow("Use PCIe input for this binding", &fromRem)) { tc.keyRemote = fromRem; trigger::touch(); }
@@ -1485,7 +1504,7 @@ void drawTriggerWindow(bool& ch) {
                 if (switchRow("accept the key on this PC", &fromLoc)) { tc.keyFromLocal = fromLoc; trigger::touch(); }
             }
         }
-        if (trigger::capturing() || tc.keySource == trigger::InputSource::MainPc ||
+        if (trigger::capturing() || tc.keySource == trigger::InputSource::MainPc || tc.secondary.source == trigger::InputSource::MainPc ||
             (tc.keySource == trigger::InputSource::Legacy && tc.keyRemote))
             ImGui::TextDisabled("PCIe input: %s", trigger::remoteKeysReady() ? "connected" : "disconnected");
         ImGui::Text("Received presses: %llu", static_cast<unsigned long long>(trigger::live().keyPresses));
@@ -1668,8 +1687,8 @@ void drawSettingsBody(Config& cfg, const Counts& n, bool live, const std::vector
     drawTriggerSection(ch);
 
     section("LOOT");
-    ch |= switchRow("High Valuables", &cfg.highValues);
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Ground Zero valuable item list. Also shares cash symbols on Webmap when the current map is published.");
+    ch |= switchRow("High Valuables >50k", &cfg.highValues);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Sellable value items with a published sale value above 50,000 rubles, plus Bitcoin. Exactly 50,000 is excluded. No weapons, armor or building items. Shares icons on Webmap. Special-item range: 1000 m, subject to client availability.");
     static bool stashLootExpanded = false;
     ch |= switchRow("Backpacks, vehicle keys & stashes", &cfg.stashLootEnabled, nullptr, &stashLootExpanded);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Also shares these markers when Webmap and Publish current map are enabled.");
@@ -1677,7 +1696,7 @@ void drawSettingsBody(Config& cfg, const Counts& n, bool live, const std::vector
         ImGui::Indent();
         for (const auto cat : {loot::Bag, loot::VehicleKey, loot::Stash}) {
             bool enabled = loot::shown(cfg.stashLootMask, cat);
-            const char* label = cat == loot::Bag ? "Backpacks" : loot::info(cat).name;
+            const char* label = cat == loot::Bag ? "Backpacks & Duffel Bags" : loot::info(cat).name;
             if (switchRow(label, &enabled)) {
                 cfg.stashLootMask ^= 1u << cat;
                 ch = true;

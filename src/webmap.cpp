@@ -268,6 +268,7 @@ std::string packet(const Options& opt, const std::shared_ptr<const Snapshot>& sn
             if (icon == radar::Icon::Loot && !layer.stashLoot && loot::shown(loot::kStashLoot, d.cat)) continue;
             if (count++) out << ',';
             out << "{\"x\":" << d.x << ",\"z\":" << d.z;
+            if (layer.highValues && loot::bitcoin(d.label)) out << ",\"bitcoin\":true";
             if (kind) {
                 out << ",\"kind\":" << json(kind);
             } else if (covered) {
@@ -322,6 +323,7 @@ std::string packet(const Options& opt, const std::shared_ptr<const Snapshot>& sn
     out << '}';
     if (!map.empty()) {
         out << ",\"heldShared\":" << (opt.shares(PlayerHeld) && (opt.shares(Own) || opt.shares(Players)) ? "true" : "false");
+        out << ",\"namesShared\":" << (opt.shares(PlayerNames) && (opt.shares(Own) || opt.shares(Players)) ? "true" : "false");
         out << ",\"healthShared\":" << (opt.shares(PlayerHealth) && (opt.shares(Own) || opt.shares(Players)) ? "true" : "false");
     }
     out << '}';

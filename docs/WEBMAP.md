@@ -95,6 +95,9 @@ objects outside the client’s loaded tables are outside this data path.
 
 **Player names** shares available in-game names with authorized browsers for
 the Tracking dropdown and marker captions.
+The `namesShared` field reports this host release. The browser explains a
+missing release, disabled captions or unresolved player identities. See
+[Player-name association](PLAYER_NAMES.md) for validation and live checks.
 
 **Als meinen Spieler speichern** stores the selected tracking target in the
 browser's local storage. The saved player stays selected while absent.
@@ -109,15 +112,21 @@ The choice is scoped to that browser and WebRadar address.
 `highValues` layer (release bit 16384), including when regular Ground Loot
 is off. Each browser can hide this layer. Small outlined cash symbols have
 fixed colours and carry no captions or pulse animation.
+Bitcoin alone uses a small gold coin with a Bitcoin B symbol on both maps.
+The web layer carries only `bitcoin:true` for that distinction; other value
+items retain the cash icon. The High Values release/filter controls both.
 
-The 102 exact classes in `src/high_value.h` were selected from
-[Ground Zero's published trader data](https://groundzerodayz.co/prices),
-dated November 2, 2026. The initial selection includes Rare Items with a
-listed maximum sale value of at least 10,000 rubles, other non-vehicle and
-non-vehicle-part items with at least 50,000 rubles, the High Value crafting
-category, and items sold for Bitcoin. These thresholds are an implementation
-choice. They describe a static list, with prices checked at implementation
-time. The existing `dayz_rare.txt` list has its own classification.
+The 12 exact classes in `src/high_value.h` are restricted to sellable value
+items from [Ground Zero's trader data](https://groundzerodayz.co/prices),
+dated November 2, 2026. The previous price-based selection also included
+weapons, armor, crafting/building items and cannabis; these are excluded now.
+The existing `dayz_rare.txt` classification remains independent.
+The High Values list now requires a listed maximum sale price **strictly
+above 50,000 rubles**. It excludes exactly 50,000 as well as cheaper items;
+for example USB collectibles (10,000), diamonds (35,000) and large paintings
+(50,000) no longer belong to this layer. These are static trader prices,
+not an estimate of dynamic player-market prices. Bitcoin keeps its dedicated
+icon and recognition rule.
 
 [Ground Zero documents physical Bitcoin](https://groundzerodayz.co/guides/bitcoin-mining).
 Its precise ground-item class is still unverified on the live session.
@@ -282,6 +291,26 @@ outside the repository.
 
 ## Verification
 
+The map area shows a branded Hirschgang waiting screen until the WebSocket
+has delivered a valid live packet with a published map. Connection loss or a
+non-live packet hides the map, controls and markers; receipt of live data
+restores the view without resetting browser preferences. Reconnect remains
+automatic. The screen uses the bundled logo, supports reduced motion and is
+included in fullscreen mode. A silent socket uses the existing 8-second
+watchdog; an explicit close/error switches immediately. If the site cannot
+load on the first visit, the browser/Cloudflare error page remains outside
+this UI's control.
+
+Special ground-loot collection includes backpacks, vehicle keys, stashes,
+covered vehicles and High Valuables from both the loot table and the near/far
+object tables. Both maps consume this shared snapshot without a 150 m distance
+cutoff. The overlay's special-item distance has a 1000 m minimum, even when its
+ordinary loot distance is smaller. Disabled categories and web releases still
+apply. This does not extend the game's object replication distance: an item
+absent from every client table cannot be displayed. Verify an identified item
+at 50, 200, 500 and 1000 m on the live server in both maps; table availability at
+1000 m has not been established by the offline fixtures.
+
 Run `tests\build_webmap_test.bat` and `node tests/webmap_browser.mjs` from the
 repository root for the Tracking browser test. Set `WEBMAP_TEST_CHROME` to the
 Chrome executable if it is installed elsewhere. The test opens two isolated
@@ -317,3 +346,10 @@ gestures, and an authenticated external Cloudflare tunnel still need an
 end-to-end test. The MSVC batch build was used on this machine.
 
 The launcher scripts now open the launcher directly. An in-flight attach must release the previous DMA session before Start becomes available again.
+
+Duffel/Duffle bag class stems (including GZ-prefixed forms) use the backpack
+category and icon. HiddenStash variants and GZ_Safe (including variants other
+than key/kit classes) use the stash category and icon. Both existing subfilters
+and host releases apply. GZ_Safe is listed by the server's trader data; the exact
+Ground Zero random-loot Duffel/Safe class still needs a live sample. Unknown
+mod classes can be mapped with explicit bag/stash rules in dayz_loot_cats.txt.

@@ -42,7 +42,19 @@ const Info& info(int cat);
 
 constexpr bool shown(unsigned mask, int cat) { return cat >= 0 && cat < Count && (mask >> cat & 1u) != 0; }
 
+// Ground items can migrate between the loot and near/far object tables.
+constexpr bool mapSourceCategory(int cat, bool stashes, bool covered, bool highValues) {
+    return (stashes && shown(kStashLoot, cat)) ||
+           (covered && cat == CoveredVehicle) || (highValues && cat == HighValue);
+}
+
+inline float effectiveRange(int cat, float configured) {
+    return (shown(kStashLoot, cat) || cat == CoveredVehicle || cat == HighValue) && configured < 1000.f
+        ? 1000.f : configured;
+}
+
 bool valuable(int cat);
+bool bitcoin(const std::string& name);
 
 int classify(int engineCat, const std::string& name);
 

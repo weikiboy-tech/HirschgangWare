@@ -76,6 +76,7 @@
     <ClInclude Include="src\radar_events.h" />
     <ClInclude Include="src\radar_corpses.h" />
     <ClInclude Include="src\player_health.h" />
+    <ClInclude Include="src\player_identity.h" />
     <ClInclude Include="src\overlay_motion.h" />
     <ClInclude Include="src\high_value.h" />
     <ClInclude Include="src\trigger_geometry.h" />

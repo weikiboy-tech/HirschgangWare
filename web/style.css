@@ -65,6 +65,22 @@ dt { color: var(--muted); }
 dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
 #stage { position: relative; flex: 1; min-width: 0; background: #0c151b; }
 #stage:fullscreen { width: 100%; height: 100%; }
+#stage.waiting > :not(#connection-screen) { visibility: hidden; }
+#connection-screen {
+  position: absolute; inset: 0; z-index: 3; display: grid; place-items: center;
+  padding: 2rem 1rem; overflow: auto; text-align: center;
+  background: radial-gradient(ellipse at 50% 38%, #163a3d 0, #101e26 40%, #0b1116 78%);
+}
+#connection-screen[hidden] { display: none; }
+.connection-card { width: min(100%, 34rem); margin: auto; }
+.connection-logo { display: block; width: clamp(88px, 18vw, 144px); height: auto; margin: 0 auto 1.75rem; filter: drop-shadow(0 0 24px #58ead025); }
+.connection-eyebrow { color: var(--accent); font-size: .72rem; letter-spacing: .22em; font-weight: 600; }
+.connection-card h1 { margin: 1rem 0; font-size: clamp(1.35rem, 3vw, 2.1rem); line-height: 1.3; font-weight: 600; }
+.connection-card p { color: var(--muted); margin: 0 0 2rem; }
+.connection-retry { display: inline-flex; align-items: center; justify-content: center; gap: .65rem; color: var(--muted); font-size: .8rem; line-height: 1.5; }
+.connection-spinner { flex-shrink: 0; width: 15px; height: 15px; border: 2px solid #58ead030; border-top-color: var(--accent); border-radius: 50%; animation: connection-spin 1.2s linear infinite; }
+@keyframes connection-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .connection-spinner { animation: none; } }
 #canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: grab; }
 #canvas.dragging { cursor: grabbing; }
 #canvas.placing { cursor: crosshair; }

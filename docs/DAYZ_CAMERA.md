@@ -82,3 +82,15 @@ oder passt der Bildrand bei korrekter Mitte nicht, muss die zusätzliche
 Optikprojektion beziehungsweise Nachbearbeitung separat identifiziert
 werden. Ohne diese Daten bleibt die Zielfernrohrdarstellung am Fuser
 unverifiziert.
+
+### Rumpfbreite (2026-11-18)
+
+Die aktuelle Zielauswertung verwendet projizierte Körperregionen statt nur
+Knochenpunkte. Brust und Bauch verwenden jetzt einen Kapselradius von 35 %
+statt 30 % des gemessenen Schulterabstands (rund 17 % breiter). Kopf, Hals,
+Arme, Beine und die zusätzliche Pixeltoleranz bleiben unverändert. Das ist
+eine anatomische Näherung, keine ausgelesene Engine-Kollisionsgeometrie.
+Der Test prüft beide Seitenränder ohne Pixeltoleranz bei drei Zoomstufen
+und drei Auflösungen sowie den unveränderten Kopfbereich. Der reale Rand
+muss mit sichtbaren Rumpfregionen im Spiel geprüft werden; ein Monitorfoto
+allein liefert dafür keine präzise geometrische Messung.

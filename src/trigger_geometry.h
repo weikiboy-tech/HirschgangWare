@@ -98,8 +98,9 @@ inline void appendBody(const dayz_camera::Cam& camera, const Viewport& viewport,
     const float shoulders = length(joints[4], joints[7]);
     if (!(shoulders >= .12f && shoulders <= 1.f)) return;
     if (valid(1)) add(1, joints[1], midpoint(joints[4], joints[7]), shoulders * .12f);
-    if (valid(1) && valid(2)) add(2, joints[1], joints[2], shoulders * .30f);
-    if (valid(2) && valid(3)) add(3, joints[2], joints[3], shoulders * .30f);
+    // Slightly fuller torso envelope; head and limb dimensions stay independent.
+    if (valid(1) && valid(2)) add(2, joints[1], joints[2], shoulders * .35f);
+    if (valid(2) && valid(3)) add(3, joints[2], joints[3], shoulders * .35f);
     constexpr int chains[][3] = {{4, 5, 6}, {7, 8, 9}, {10, 11, 12}, {13, 14, 15}};
     for (const auto& chain : chains) {
         const float radius = shoulders * (chain[0] >= 10 ? .18f : .12f);

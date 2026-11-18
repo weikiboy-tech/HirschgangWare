@@ -4,119 +4,33 @@
 
 namespace high_value {
 
+inline bool bitcoin(std::string_view name) {
+    constexpr std::string_view token = "_bitcoin";
+    return name == "bitcoin" || (name.size() > token.size() &&
+        name.substr(name.size() - token.size()) == token);
+}
+
 // Exact Ground Zero classes from https://groundzerodayz.co/prices, data dated 2026-11-02.
-// Selection criteria and unverified Bitcoin aliases are documented in WEBMAP.md.
+// Only sellable valuables with a listed maximum sale price strictly above 50,000 rubles.
 inline bool matches(std::string_view name) {
     constexpr std::string_view classes[] = {
-        "collectable_crossnecklace",
-        "collectable_floppydisks_1999",
-        "collectable_intel",
-        "collectable_ram",
-        "collectable_retrotoy",
-        "collectable_smartphone_black",
-        "collectable_ssd",
-        "collectable_usb",
-        "cp_cannabisbrickblackfrost",
-        "cp_cannabisbrickbluegod",
-        "cp_cannabisbrickfuture",
-        "cp_cannabisbricknomad",
-        "cp_cannabisbrickpurplekush",
-        "cp_cannabisbricks1",
-        "cp_cannabisbrickskunk",
-        "cp_cannabisbrickstardawg",
-        "gz_diamond",
-        "gz_dvl10m1",
-        "gz_gevar_black",
-        "gz_gevar_grey",
-        "gz_hk23e_black",
-        "gz_m134",
-        "gz_m200_black",
-        "gz_m200_grey",
-        "gz_m300",
-        "gz_m32_black",
-        "gz_mar10",
-        "gz_mk18mjolnir",
-        "gz_qboombox",
-        "gz_qboombox_black",
-        "gz_r700timberwolf408",
-        "gz_revolver50",
-        "gz_ruby",
-        "gz_saphire",
-        "gz_scar20s",
-        "gz_srsa2",
-        "gz_tac21",
-        "gz_vssk",
-        "gz_workbench_black_kit",
-        "gz_workbench_grinder",
-        "gz_workbench_magloader",
-        "gz_workbench_tablesaw",
-        "gz_xm2010",
-        "gz_xm250",
-        "gz_xm250_black",
-        "gz_z008",
-        "gzeft_cat",
-        "gzeft_converter",
-        "gzeft_gp",
         "gzeft_hvegyptiantower",
         "gzeft_hvglobe",
         "gzeft_hvgoldenpendant",
-        "gzeft_hvlargepainting_1",
-        "gzeft_hvlargepainting_2",
-        "gzeft_hvlargepainting_3",
-        "gzeft_hvlargepainting_4",
-        "gzeft_hvlargepainting_5",
-        "gzeft_hvlargepainting_6",
-        "gzeft_hvlargepainting_7",
-        "gzeft_hvlargepaintingportrait_1",
-        "gzeft_hvlargepaintingportrait_2",
-        "gzeft_hvlargepaintingportrait_3",
-        "gzeft_hvlargepaintingportrait_4",
-        "gzeft_hvlargepaintingportrait_5",
-        "gzeft_hvlargepaintingportrait_6",
-        "gzeft_hvlargepaintingportrait_7",
         "gzeft_hvpainting",
         "gzeft_hvrhinohorn",
         "gzeft_hvvase",
         "gzeft_ledx",
-        "gzeft_lion",
-        "gzeft_microcontroller",
-        "gzeft_militaryboard",
-        "gzeft_militarycable",
-        "gzeft_militaryflash",
         "gzeft_moonshine",
-        "gzeft_rfidreader",
-        "gzeft_rolex",
-        "gzeft_rooster",
-        "gzeft_sugar",
         "gzeft_tankbattery",
-        "gzeft_teapot",
-        "gzeft_thermite",
         "gzeft_virtex",
-        "gzeft_water",
-        "gzeft_whiskey",
-        "gzeft_wirelesstransmitter",
-        "halloween_creepydoll",
-        "halloween_eyeballjar",
-        "halloween_ouijaboard",
-        "halloween_pumpkin_cursed",
-        "halloween_voodoodoll",
-        "imp_helmet_1sch_green",
-        "imp_helmet_k63_black",
-        "imp_helmet_k63_green",
-        "imp_vest_6b43n_black",
-        "imp_vest_6b43n_green",
-        "imp_vest_6b43n_tan",
-        "videocard_bl2060",
-        "videocard_bl2080",
         "videocard_bl3060",
         "videocard_bl3080",
     };
     for (const auto candidate : classes) if (name == candidate) return true;
     // Physical Bitcoin is documented by the server. Its exact class still needs
     // a live sample. Match the complete terminal token, excluding miner parts.
-    constexpr std::string_view token = "_bitcoin";
-    return name == "bitcoin" || (name.size() > token.size() &&
-        name.substr(name.size() - token.size()) == token);
+    return bitcoin(name);
 }
 
 }

@@ -28,7 +28,7 @@ const Info kInfo[Count] = {
     {"Vehicle parts", "vehicle", RGB(175, 115, 255)},
     {"Base building", "base", RGB(70, 215, 175)},
     {"Rare", "rare", RGB(255, 215, 0)},
-    {"Hidden stashes", "stash", RGB(110, 220, 172)},
+    {"Hidden stashes & safes", "stash", RGB(110, 220, 172)},
     {"Vehicle keys", "vehiclekey", RGB(255, 210, 100)},
     {"Covered Vehicles", "coveredvehicle", RGB(137, 220, 190)},
     {"High Valuables", "highvalue", RGB(218, 203, 140)},
@@ -143,6 +143,8 @@ bool valuable(int cat) {
     }
 }
 
+bool bitcoin(const std::string& name) { return high_value::bitcoin(lower(name)); }
+
 int classify(int engineCat, const std::string& name) {
     const std::string n = lower(name);
     for (const auto& [cat, pat] : gOverride)
@@ -151,11 +153,16 @@ int classify(int engineCat, const std::string& name) {
     if (coveredVehicle(n)) return CoveredVehicle;
     if (engineCat == Gun) return Gun;
     if (engineCat == Ammo || n.rfind("ammo_", 0) == 0 || n.rfind("mag_", 0) == 0) return Ammo;
-    if (n == "undergroundstash" || n == "hiddenstash" || n.rfind("undergroundstash_", 0) == 0) return Stash;
+    if (n == "undergroundstash" || n == "hiddenstash" || n.rfind("undergroundstash_", 0) == 0 ||
+        n.rfind("hiddenstash_", 0) == 0 || n == "gz_safe" ||
+        (n.rfind("gz_safe_", 0) == 0 && n.find("kit") == std::string::npos && n.find("key") == std::string::npos) ||
+        n == "safe") return Stash;
     if (n == "expansioncaradminkey" || n.rfind("expansioncarkey", 0) == 0 ||
         n == "vehiclekey" || n.rfind("vehiclekey_", 0) == 0 ||
         n == "carkey" || n.rfind("carkey_", 0) == 0) return VehicleKey;
-    if (n.find("backpack") != std::string::npos || n.rfind("mountainbag_", 0) == 0 ||
+    if (n.rfind("duffelbag", 0) == 0 || n.rfind("dufflebag", 0) == 0 ||
+        n.rfind("gz_duffelbag", 0) == 0 || n.rfind("gz_dufflebag", 0) == 0 ||
+        n.find("backpack") != std::string::npos || n.rfind("mountainbag_", 0) == 0 ||
         n.rfind("huntingbag_", 0) == 0 || n.rfind("assaultbag_", 0) == 0 ||
         n.rfind("tortillabag_", 0) == 0 || n.rfind("courierbag", 0) == 0 ||
         n.rfind("improvisedbag", 0) == 0 || n.rfind("alicebag_", 0) == 0 ||
