@@ -22,6 +22,33 @@ inline float length(Vec3 a, Vec3 b) {
 inline float turn(Point a, Point b, Point c) {
     return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
 }
+struct HeadShape {
+    Vec3 center{};
+    float gap = 0, radius = 0;
+    const char* reason = "head/neck missing";
+};
+inline HeadShape headShape(Vec3 head, Vec3 neck) {
+    HeadShape result;
+    if (!dayz_camera::finite(head) || !dayz_camera::finite(neck)) return result;
+    result.center=head;result.gap=length(head,neck);
+    if (result.gap<.04f || result.gap>.5f) {result.reason="head/neck separation rejected";return result;}
+    result.radius=std::min(.12f,result.gap*.5f);result.reason="head geometry ready";
+    return result;
+}
+inline HeadShape headShape(const std::array<Vec3,16>& joints) { return headShape(joints[0],joints[1]); }
+struct Disc { float x=0,y=0,rx=0,ry=0; bool valid=false; };
+inline Disc projectDisc(const dayz_camera::Cam& camera,const Viewport& viewport,Vec3 center,float radius) {
+    Disc result;
+    if (!(radius>0) || !std::isfinite(radius) || !dayz_camera::validLens(camera)) return result;
+    const Vec3 delta{center.x-camera.pos.x,center.y-camera.pos.y,center.z-camera.pos.z};
+    const float depth=dayz_camera::dot(delta,camera.fwd);
+    const float width=viewport.right-viewport.left,height=viewport.bottom-viewport.top;
+    if (!(depth>radius*2.f) || !dayz_camera::toScreen(camera,center,width,height,result.x,result.y)) return result;
+    result.x+=viewport.left;result.y+=viewport.top;
+    result.rx=width*.5f*radius/(depth*camera.px);result.ry=height*.5f*radius/(depth*camera.py);
+    result.valid=std::isfinite(result.rx) && std::isfinite(result.ry) && result.rx>0 && result.ry>0;
+    return result;
+}
 
 inline void capsule(const dayz_camera::Cam& camera, const Viewport& viewport,
                     Vec3 a, Vec3 b, float radius, trigger::Cand candidate,
@@ -31,20 +58,13 @@ inline void capsule(const dayz_camera::Cam& camera, const Viewport& viewport,
     float minimumRadius = INFINITY;
     for (unsigned end = 0; end < 2; ++end) {
         const Vec3 center = end ? b : a;
-        const Vec3 delta{center.x - camera.pos.x, center.y - camera.pos.y, center.z - camera.pos.z};
-        const float depth = dayz_camera::dot(delta, camera.fwd);
-        if (!(depth > radius * 2.f)) return;
-        float x, y;
-        const float width = float(viewport.right - viewport.left), height = float(viewport.bottom - viewport.top);
-        if (!dayz_camera::toScreen(camera, center, width, height, x, y)) return;
-        const float rx = width * .5f * radius / (depth * camera.px);
-        const float ry = height * .5f * radius / (depth * camera.py);
-        if (!std::isfinite(rx) || !std::isfinite(ry)) return;
+        const auto disc=projectDisc(camera,viewport,center,radius);
+        if (!disc.valid) return;
+        const float rx=disc.rx,ry=disc.ry;
         minimumRadius = std::min(minimumRadius, std::min(rx, ry));
         for (unsigned i = 0; i < 16; ++i) {
             const float angle = float(i) * 6.28318530718f / 16.f;
-            points[end * 16 + i] = {viewport.left + x + rx * std::cos(angle),
-                                    viewport.top + y + ry * std::sin(angle)};
+            points[end * 16 + i] = {disc.x + rx * std::cos(angle),disc.y + ry * std::sin(angle)};
         }
     }
     std::sort(points.begin(), points.end(), [](Point p, Point q) {
@@ -89,11 +109,8 @@ inline void appendBody(const dayz_camera::Cam& camera, const Viewport& viewport,
     };
     // Conservative anatomical envelopes derived from the measured skeleton.
     // They approximate body volume. They are not engine collision hitboxes.
-    if (valid(0) && valid(1)) {
-        const float head = length(joints[0], joints[1]);
-        if (head >= .04f && head <= .5f)
-            add(0, joints[0], joints[0], std::min(.12f, head * .5f));
-    }
+    const auto head=headShape(joints);
+    if (head.radius>0) add(0,head.center,head.center,head.radius);
     if (!valid(4) || !valid(7)) return;
     const float shoulders = length(joints[4], joints[7]);
     if (!(shoulders >= .12f && shoulders <= 1.f)) return;

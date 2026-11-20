@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "crosshair.h"
+#include "clutch.h"
 #include "loot.h"
 #include "webmap.h"
 
@@ -21,6 +22,7 @@ struct EspSettings {
     long displayW = 0, displayH = 0;
 
     bool skeleton = true, box = false, names = true, info = true, fps = true;
+    clutch::Config clutch;
     int predictMs = 12;
     bool uncapped = true;
     int dzRange = 1000;

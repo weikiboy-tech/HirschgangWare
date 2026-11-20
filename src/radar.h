@@ -11,6 +11,7 @@
 #include "radar_corpses.h"
 #include "radar_events.h"
 #include "crosshair.h"
+#include "clutch.h"
 #include "player_health.h"
 #include "webmap.h"
 
@@ -104,6 +105,9 @@ struct Config {
     std::string downloadReq;
     bool cancelReq = false;
     struct Esp {
+        clutch::Config clutch;
+        bool clutchActive = false, clutchReady = false, clutchBinding = false;
+        bool clutchBind = false, clutchCancel = false;
         bool skeleton = true, box = false, names = true, distance = true;
         bool fps = true, uncapped = true;
         bool held = true;

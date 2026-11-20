@@ -81,6 +81,8 @@
     <ClInclude Include="src\high_value.h" />
     <ClInclude Include="src\trigger_geometry.h" />
     <ClInclude Include="src\crosshair.h" />
+    <ClInclude Include="src\clutch.h" />
+    <ClInclude Include="src\player_roster.h" />
     <ClInclude Include="src\dayz_camera.h" />
     <ClInclude Include="src\webmap.h" />
     <ClInclude Include="src\webmap_state.h" />

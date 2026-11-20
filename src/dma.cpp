@@ -158,6 +158,10 @@ public:
         memFree_(entry);
         pid_ = pid;
         pteCache_.clear();
+        processObject_ = 0;
+        VMMDLL_PROCESS_INFORMATION info{};
+        if (processInfo(info) && info.dwPID == pid_ && info.dwState == 0)
+            processObject_ = info.win.vaEPROCESS;
         captureAliveProbes();
         return true;
     }
@@ -287,22 +291,55 @@ public:
 
     bool alive() const override {
         TimedLock lk(mx_);
-        if (!vmm_ || !pid_ || !mod_.base) return false;
+        if (!vmm_ || !pid_ || !mod_.base) { aliveDetail_ = "not attached"; return false; }
+        if (processObject_ && remoteProcess_ && configSet_) {
+            // A PE header may be paged out/unreadable while all game data works.
+            // Refresh this process's kernel record instead, including with -norefresh.
+            const uint64_t started = qpcUs();
+            const bool refreshed = configSet_(vmm_, VMMDLL_OPT_REFRESH_SPECIFIC_PROCESS | pid_, 1) != FALSE;
+            tel::time(tel::T_REFRESH, qpcUs() - started);
+            tel::count(tel::C_REFRESHES);
+            if (!refreshed) { aliveDetail_ = "process identity refresh failed"; return false; }
+            VMMDLL_PROCESS_INFORMATION info{};
+            if (!processInfo(info)) { aliveDetail_ = "process information unavailable"; return false; }
+            if (info.dwPID != pid_ || info.win.vaEPROCESS != processObject_) {
+                aliveDetail_ = "attached process identity changed"; return false;
+            }
+            if (info.dwState != 0) { aliveDetail_ = "target process no longer active"; return false; }
+            // Metadata alone can be cached across a disconnected DMA device. Require
+            // a real, uncached, non-paged read from that same kernel process object.
+            uint8_t bytes[16]{};
+            DWORD got = 0;
+            const bool readable = readEx_(vmm_, 4, processObject_, bytes, sizeof bytes, &got,
+                                         VMMDLL_FLAG_NOCACHE | VMMDLL_FLAG_NOPAGING) && got == sizeof bytes;
+            aliveDetail_ = readable ? "kernel process identity + uncached transport OK" : "uncached process-object read failed";
+            return readable;
+        }
         struct PagingOk {
             bool& f;
             explicit PagingOk(bool& b) : f(b) { f = true; }
             ~PagingOk() { f = false; }
         } po(pagingOk_);
         uint16_t mz = 0;
-        if (read(mod_.base, &mz, sizeof mz) && mz == 0x5A4D) return true;
+        if (read(mod_.base, &mz, sizeof mz) && mz == 0x5A4D) { aliveDetail_ = "legacy PE header OK"; return true; }
         for (const auto& p : probes_) {
             uint8_t b[sizeof p.bytes];
-            if (read(p.addr, b, sizeof b) && memcmp(b, p.bytes, sizeof b) == 0) return true;
+            if (read(p.addr, b, sizeof b) && memcmp(b, p.bytes, sizeof b) == 0) { aliveDetail_ = "legacy image probe OK"; return true; }
         }
+        aliveDetail_ = "no kernel identity available; PE/image probes failed";
         return false;
     }
+    const char* aliveDetail() const override { return aliveDetail_.load(); }
 
 private:
+    bool processInfo(VMMDLL_PROCESS_INFORMATION& info) const {
+        info = {};
+        info.magic = VMMDLL_PROCESS_INFORMATION_MAGIC;
+        info.wVersion = VMMDLL_PROCESS_INFORMATION_VERSION;
+        info.wSize = sizeof info;
+        SIZE_T size = sizeof info;
+        return remoteProcess_ && remoteProcess_(vmm_, pid_, &info, &size) && size == sizeof info;
+    }
     struct AliveProbe {
         uintptr_t addr;
         uint8_t bytes[16];
@@ -685,6 +722,8 @@ private:
     ULONGLONG lastTlb_ = 0, lastPteFlush_ = 0;
     mutable std::unordered_map<uint64_t, uint64_t> pteCache_;
     std::vector<AliveProbe> probes_;
+    uint64_t processObject_ = 0;
+    mutable std::atomic<const char*> aliveDetail_{"not checked"};
     mutable std::recursive_mutex mx_;
     mutable std::atomic<int> waiting_[3] = {};
     PfnConfigSet configSet_ = nullptr;

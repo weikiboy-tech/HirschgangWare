@@ -255,6 +255,7 @@ void setMapSampler(const ImDrawList*, const ImDrawCmd*) {
 }
 
 LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && wp == VK_ESCAPE && clutch::runtime().cancelEscape()) return 0;
     if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && wp == VK_ESCAPE && trigger::cancelCaptureEscape()) return 0;
     if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wp, lp)) return true;
     const bool imguiMouse = gImguiReady && ImGui::GetCurrentContext() && ImGui::GetIO().WantCaptureMouse;
@@ -1327,8 +1328,7 @@ static bool vkExtended(int vk) {
     }
 }
 
-void keyLabel(char* out, size_t n, int slot = 0) {
-    const int k = trigger::binding(slot).key;
+void vkLabel(char* out, size_t n, int k) {
     if (k >= 1 && k <= 5) {
         static const char* const m[6] = {"", "Left mouse", "Right mouse", "Middle mouse", "Mouse 4", "Mouse 5"};
         std::snprintf(out, n, "%s", m[k]);
@@ -1353,6 +1353,8 @@ void keyLabel(char* out, size_t n, int slot = 0) {
     }
     std::snprintf(out, n, "code 0x%02X (%d)", k, k);
 }
+
+void keyLabel(char* out, size_t n, int slot = 0) { vkLabel(out, n, trigger::binding(slot).key); }
 
 void drawTriggerBindings(bool& ch, const char* scope) {
     ImGui::PushID(scope);
@@ -1554,6 +1556,14 @@ void drawTriggerWindow(bool& ch) {
         ImGui::SameLine();
         ImGui::TextDisabled("clicks sent: %d", lv.clicks);
         ImGui::Text("target under crosshair: %s", !lv.projectionReady ? "camera unavailable" : (lv.target ? "yes" : "no"));
+        ImGui::TextWrapped("Head: %s", lv.head.reason);
+        if (std::isfinite(lv.head.offsetPx)) {
+            ImGui::TextDisabled("%.0f m | pose %.1f ms | head/neck %.3f m", lv.head.range, lv.head.ageMs, lv.head.gap);
+            ImGui::TextDisabled("Head radius %.2f px | center offset %.2f px", lv.head.radiusPx, lv.head.offsetPx);
+        }
+        ImGui::PushTextWrapPos(0.f);
+        ImGui::TextDisabled("Head outline uses the tested projection. Stroke thickness does not enlarge detection. Show body regions displays the full tested polygons.");
+        ImGui::PopTextWrapPos();
         ImGui::TextDisabled("Fresh body regions: %u", lv.regionCount);
         if (lv.target) ImGui::TextDisabled("%s  %.0f m  %.0f px   held %d ms", trigger::boneName(lv.bone), lv.dist, lv.px, lv.heldMs);
         if (!lv.note.empty()) ImGui::TextDisabled("%s", lv.note.c_str());
@@ -1614,6 +1624,36 @@ void drawSettingsBody(Config& cfg, const Counts& n, bool live, const std::vector
     section("ESP OVERLAY");
     {
         Config::Esp& e = cfg.esp;
+        ImGui::PushID("clutch");
+        ImGui::SeparatorText("CLUTCH MODE");
+        ch |= switchRow("Enable Clutch Mode", &e.clutch.enabled);
+        char clutchKey[64];
+        vkLabel(clutchKey, sizeof clutchKey, e.clutch.key);
+        const std::string bindText = e.clutchBinding ? "Press Main-PC key (Esc cancels)" :
+            std::string("Hotkey: ") + (e.clutch.key ? clutchKey : "Press to bind");
+        if (chip(bindText.c_str(), e.clutchBinding, std::max(100.f, ImGui::GetContentRegionAvail().x - 60.f))) {
+            if (e.clutchBinding) cfg.esp.clutchCancel = true;
+            else cfg.esp.clutchBind = true;
+        }
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!e.clutch.key && !e.clutchBinding);
+        if (chip("Clear", false, 52.f)) { e.clutch.key=0; e.clutchCancel=true;ch=true; }
+        ImGui::EndDisabled();
+        int activation = e.clutch.activation == clutch::Activation::Hold ? 1 : 0;
+        ImGui::SetNextItemWidth(130.f);
+        if (ImGui::Combo("Activation", &activation, "Toggle\0Hold\0")) {
+            e.clutch.activation=activation ? clutch::Activation::Hold : clutch::Activation::Toggle;ch=true;
+        }
+        ch |= switchRow("Real Skeletons Only", &e.clutch.realBonesOnly);
+        const char* clutchStatus = e.clutchBinding ? "BINDING" : e.clutchActive ? "ACTIVE" : e.clutchReady ? "READY" : "NO INPUT";
+        ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(e.clutchActive ? th::Accent : th::Text), "%s", clutchStatus);
+        ImGui::PushTextWrapPos(0.f);
+        ImGui::TextDisabled("Gaming-PC keyboard only. Esc cancels. End / F8 reserved.");
+        ImGui::PopTextWrapPos();
+        for (int slot=0;slot<2;++slot) if (e.clutch.key && trigger::binding(slot).key==e.clutch.key)
+            ImGui::TextWrapped("Warning: also bound to trigger %s. Both functions remain active.", slot ? "Secondary" : "Primary");
+        ImGui::PopID();
+        ImGui::SeparatorText("NORMAL OVERLAY");
         float enemyRgb[]{GetRValue(e.enemyColor) / 255.f, GetGValue(e.enemyColor) / 255.f, GetBValue(e.enemyColor) / 255.f};
         ImGui::SetNextItemWidth(136.f);
         if (ImGui::ColorEdit3("Enemy Color", enemyRgb, ImGuiColorEditFlags_DisplayHex | ImGuiColorEditFlags_Uint8)) {

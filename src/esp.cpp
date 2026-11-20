@@ -40,6 +40,7 @@
 #include "loot.h"
 #include "overlay_motion.h"
 #include "player_identity.h"
+#include "player_roster.h"
 #include "mapdl.h"
 #include "trigger.h"
 #include "trigger_geometry.h"
@@ -76,7 +77,7 @@ struct Ent {
 struct Skeleton {
     POINT pt[DJ_Count];
     bool ok[DJ_Count];
-    int headRadius;
+    trigger_geometry::Disc head;
 };
 
 struct StickJoint {
@@ -123,6 +124,7 @@ struct Box {
 
 std::unique_ptr<Process> gProc;
 EspSettings gSettings;
+std::atomic<bool> gClutchBones{false};
 bool gDma = false;
 bool gFull = false;
 bool gForceGdi = false;
@@ -1224,8 +1226,9 @@ void scanDayz(DzSnap& out, const char*& stage) {
     }
 
     const int triggerBoneRange = gDzTriggerBoneRange.load(std::memory_order_relaxed);
-    const bool wantBones = gSettings.skeleton || triggerBoneRange > 0;
-    const float boneRange = float(gSettings.skeleton ? gSettings.dzRange : std::min(gSettings.dzRange, triggerBoneRange));
+    const bool overlayBones = gSettings.skeleton || gClutchBones.load(std::memory_order_relaxed);
+    const bool wantBones = overlayBones || triggerBoneRange > 0;
+    const float boneRange = float(overlayBones ? gSettings.dzRange : std::min(gSettings.dzRange, triggerBoneRange));
     struct BoneRead {
         size_t ti, req;
         uint64_t arr, arrNow = 0;
@@ -1241,6 +1244,8 @@ void scanDayz(DzSnap& out, const char*& stage) {
             if (pit == gDzEntPos.end()) continue;
             const Vec3& p = pit->second;
             const float d = camDist(p);
+            // Clutch alone needs human bones, never extra infected bone reads.
+            if (targets[i].kind == 2 && !gSettings.skeleton && (triggerBoneRange <= 0 || d > float(triggerBoneRange) + 10.f)) continue;
             if (d > boneRange + 10.f) continue;
             if (camFresh && !dzMaybeVisible(cs.c, p)) continue;
             wantSkel[i] = 1;
@@ -1474,105 +1479,20 @@ void scanDayz(DzSnap& out, const char*& stage) {
 
     if (now - gDzRosterTick >= dz::kRosterMs) {
         gDzRosterTick = now;
-        std::unordered_map<uint32_t, std::string> fresh;
-        std::unordered_set<uint32_t> conflictingIds;
-        bool rosterRead = false;
-        uint64_t nc = 0, arr = 0;
-        if (gProc->read(uintptr_t(base + dz::kNetClient), nc) && dz::heapPtr(nc) && gProc->read(uintptr_t(nc + dz::kNcRoster), arr) &&
-            dz::heapPtr(arr)) {
-            int32_t cnt = 0;
-            const bool countOk = gProc->read(uintptr_t(nc + dz::kNcRoster + 8), cnt);
-            if (!countOk || cnt < 0 || cnt > dz::kMaxRoster) cnt = 0;
-            std::vector<uint64_t> ids(size_t(cnt), 0);
-            if (countOk && cnt > 0 && gProc->read(uintptr_t(arr), ids.data(), ids.size() * 8)) {
-                std::vector<uint64_t> live;
-                std::unordered_set<uint64_t> uniqueRows;
-                for (uint64_t id : ids)
-                    if (dz::heapPtr(id) && uniqueRows.insert(id).second) live.push_back(id);
-                std::vector<uint32_t> nid(live.size(), 0);
-                std::vector<uint64_t> str(live.size(), 0);
-                reqs.clear();
-                for (size_t k = 0; k < live.size(); ++k) {
-                    reqs.push_back({uintptr_t(live[k] + dz::kIdNetId), &nid[k], 4});
-                    reqs.push_back({uintptr_t(live[k] + dz::kIdName), &str[k], 8});
-                }
-                gProc->readMany(reqs);
-                std::vector<bool> fieldsOk(live.size());
-                for (size_t k = 0; k < live.size(); ++k)
-                    fieldsOk[k] = reqs[2*k].ok && reqs[2*k+1].ok;
-                std::vector<uint8_t> nb(live.size() * kPName, 0);
-                reqs.clear();
-                for (size_t k = 0; k < live.size(); ++k)
-                    reqs.push_back({uintptr_t(dz::heapPtr(str[k]) ? str[k] + dz::kNameText : 0), &nb[k * kPName], kPName});
-                gProc->readMany(reqs);
-                std::vector<std::string> rowNames(live.size());
-                for (size_t k = 0; k < live.size(); ++k)
-                    if (fieldsOk[k] && reqs[k].ok) rowNames[k] = player_identity::text(&nb[k * kPName], kPName);
-                std::vector<uint32_t> idsAgain(live.size());
-                std::vector<uint64_t> stringsAgain(live.size());
-                reqs.clear();
-                for (size_t k = 0; k < live.size(); ++k) {
-                    reqs.push_back({uintptr_t(live[k] + dz::kIdNetId), &idsAgain[k], 4});
-                    reqs.push_back({uintptr_t(live[k] + dz::kIdName), &stringsAgain[k], 8});
-                }
-                gProc->readMany(reqs);
-#ifndef HIRSCHGANGWARE_NO_DIAG
-                size_t anon = SIZE_MAX;
-#endif
-                for (size_t k = 0; k < live.size(); ++k) {
-                    const bool stable = reqs[2*k].ok && reqs[2*k+1].ok &&
-                        idsAgain[k] == nid[k] && stringsAgain[k] == str[k];
-                    const std::string nm = stable ? rowNames[k] : std::string();
-                    player_identity::insert(fresh, conflictingIds, nid[k], nm);
-#ifndef HIRSCHGANGWARE_NO_DIAG
-                    if (anon == SIZE_MAX && nm.rfind("Survivor", 0) == 0) anon = k;
-#endif
-                }
-                // Validate the table again after reading its rows; do not publish a torn list.
-                uint64_t ncAgain = 0, arrAgain = 0;
-                int32_t countAgain = -1;
-                rosterRead = gProc->read(uintptr_t(base + dz::kNetClient), ncAgain) && ncAgain == nc &&
-                    gProc->read(uintptr_t(nc + dz::kNcRoster), arrAgain) && arrAgain == arr &&
-                    gProc->read(uintptr_t(nc + dz::kNcRoster + 8), countAgain) && countAgain == cnt;
-#ifndef HIRSCHGANGWARE_NO_DIAG
-                static uint64_t probedWorld = 0;
-                if (probedWorld != world && !fresh.empty()) {
-                    probedWorld = world;
-                    std::string all;
-                    int anonCount = 0;
-                    for (const auto& kv : fresh) {
-                        anonCount += kv.second.rfind("Survivor", 0) == 0;
-                        if (all.size() < 1800) all += (all.empty() ? "" : ", ") + kv.second;
-                    }
-                    logLine("[log] roster names (%zu, %d \"Survivor\"): %s", fresh.size(), anonCount, all.c_str());
-                    if (anon != SIZE_MAX) {
-                        constexpr uint32_t kIdBytes = 0x180;
-                        std::vector<uint64_t> slot(kIdBytes / 8, 0);
-                        gProc->read(uintptr_t(live[anon]), slot.data(), kIdBytes);
-                        std::vector<uint8_t> tb(slot.size() * kPName, 0);
-                        reqs.clear();
-                        for (size_t s = 0; s < slot.size(); ++s)
-                            reqs.push_back({uintptr_t(dz::heapPtr(slot[s]) ? slot[s] + dz::kNameText : 0), &tb[s * kPName], kPName});
-                        gProc->readMany(reqs);
-                        std::string fields;
-                        for (size_t s = 0; s < slot.size(); ++s) {
-                            const std::string t = reqs[s].ok ? cleanName(&tb[s * kPName], kPName) : std::string();
-                            if (!t.empty()) fields += "  +0x" + [](size_t v) { char b[8]; std::snprintf(b, sizeof b, "%zX", v); return std::string(b); }(s * 8) + "=\"" + t + "\"";
-                        }
-                        logLine("[log] roster probe: identity %llX (net id %u) text fields:%s", (unsigned long long)live[anon], nid[anon],
-                                fields.empty() ? " none" : fields.c_str());
-                    }
-                }
-#endif
-            }
-        }
-        {
-            if (!rosterRead) fresh.clear();
-            gDzRoster = std::move(fresh);
-            auto names = std::make_shared<std::vector<std::string>>();
-            for (const auto& kv : gDzRoster) names->push_back(kv.second);
-            std::sort(names->begin(), names->end(), [](const std::string& a, const std::string& b) { return _stricmp(a.c_str(), b.c_str()) < 0; });
-            if (!gDzOnline || *gDzOnline != *names) gDzOnline = std::move(names);
+        auto result = player_roster::read(*gProc, base + dz::kNetClient,
+            {dz::kNcRoster, dz::kIdNetId, dz::kIdName, dz::kNameText, dz::kMaxRoster}, dz::heapPtr);
+        gDzRoster = std::move(result.names);
+        auto names = std::make_shared<std::vector<std::string>>();
+        for (const auto& entry : gDzRoster) names->push_back(entry.second);
+        std::sort(names->begin(), names->end(), [](const std::string& a, const std::string& b) { return _stricmp(a.c_str(), b.c_str()) < 0; });
+        if (!gDzOnline || *gDzOnline != *names) gDzOnline = std::move(names);
+        static ULONGLONG lastStatusAt = 0;
+        static const char* lastStatus = nullptr;
+        if (result.status != lastStatus || now - lastStatusAt >= 10000) {
+            logLine("[names] %s: count=%d slots=%u fields=%u text=%u stable=%u conflicts=%u published=%zu",
+                    result.status, result.count, result.slots, result.fields, result.texts, result.stable, result.conflicts, gDzRoster.size());
+            lastStatus = result.status;
+            lastStatusAt = now;
         }
     }
     std::unordered_map<uint64_t, std::string> resolvedNames;
@@ -2364,6 +2284,7 @@ dz::Cam predictCam(const dz::Cam& c) {
 void projectDz(const DzSnap& snap, const dz::Cam& view, const Vec3& me) {
     gBoxes.clear();
     gDzTriggerRegions.clear();
+    trigger::live().head = {};
     const float range = float(gSettings.dzRange);
     const float w = float(gView.right - gView.left), h = float(gView.bottom - gView.top);
     const uint64_t nowUs = qpcUs();
@@ -2406,6 +2327,26 @@ void projectDz(const DzSnap& snap, const dz::Cam& view, const Vec3& me) {
                 std::array<Vec3, DJ_Count> worldJoints{};
                 for (int j = 0; j < DJ_Count; ++j)
                     worldJoints[size_t(j)] = {ent.joints[j].x + lead.x, ent.joints[j].y + lead.y, ent.joints[j].z + lead.z};
+                if (ent.kind == 1 && dayz_camera::finite(worldJoints[0])) {
+                    float hx = 0, hy = 0;
+                    if (dayz_camera::toScreen(view, worldJoints[0], w, h, hx, hy)) {
+                        const float offset = std::hypot(hx + gView.left - crosshair::center(gView.left,gView.right),
+                                                        hy + gView.top - crosshair::center(gView.top,gView.bottom));
+                        auto& probe = trigger::live().head;
+                        if (offset < probe.offsetPx) {
+                            const auto shape = trigger_geometry::headShape(worldJoints);
+                            const uint64_t poseAt = std::min(ent.jointsUs, ent.rootUs);
+                            const Vec3 delta{worldJoints[0].x-view.pos.x,worldJoints[0].y-view.pos.y,worldJoints[0].z-view.pos.z};
+                            const float depth = dayz_camera::dot(delta,view.fwd);
+                            probe = {};
+                            probe.range = dist;probe.gap = shape.gap;probe.offsetPx = offset;probe.isFriend = !b.enemy;
+                            probe.ageMs = poseAt && nowUs >= poseAt ? float(nowUs-poseAt)/1000.f : -1.f;
+                            probe.radiusPx = depth>0 ? std::min(w*.5f*shape.radius/(depth*view.px),h*.5f*shape.radius/(depth*view.py)) : 0;
+                            probe.reason = !dayz_camera::fresh(poseAt,nowUs,trigger_geometry::kPoseMaxAgeUs) ? "pose too old/invalid" :
+                                !b.enemy ? "friend excluded" : !(triggerConfig.hitMask & trigger::H_Head) ? "head disabled" : shape.reason;
+                        }
+                    }
+                }
                 trigger::Cand identity;
                 identity.dist = dist; identity.kind = ent.kind; identity.isFriend = !b.enemy; identity.id = b.id;
                 trigger_geometry::appendBody(view,
@@ -2422,8 +2363,12 @@ void projectDz(const DzSnap& snap, const dz::Cam& view, const Vec3& me) {
                     b.skel.ok[j] = false;
                 }
             }
-            if (b.skel.ok[DJ_Head] && b.skel.ok[DJ_Neck])
-                b.skel.headRadius = std::max(2, int(std::abs(b.skel.pt[DJ_Head].y - b.skel.pt[DJ_Neck].y)));
+            if (b.skel.ok[DJ_Head] && b.skel.ok[DJ_Neck]) {
+                const auto shape=trigger_geometry::headShape(
+                    {ent.joints[DJ_Head].x+lead.x,ent.joints[DJ_Head].y+lead.y,ent.joints[DJ_Head].z+lead.z},
+                    {ent.joints[DJ_Neck].x+lead.x,ent.joints[DJ_Neck].y+lead.y,ent.joints[DJ_Neck].z+lead.z});
+                b.skel.head=trigger_geometry::projectDisc(view,{float(gView.left),float(gView.top),float(gView.right),float(gView.bottom)},shape.center,shape.radius);
+            }
             {
                 float jx0 = 1e9f, jy0 = 1e9f, jx1 = -1e9f, jy1 = -1e9f;
                 int jn = 0;
@@ -2449,7 +2394,7 @@ void projectDz(const DzSnap& snap, const dz::Cam& view, const Vec3& me) {
     }
 
     gDzLootPts.clear();
-    if (gSettings.dzLoot && snap.loot) {
+    if (!clutch::runtime().active && gSettings.dzLoot && snap.loot) {
         float lootRange = range;
         if (gSettings.dzLootRange > 0 && float(gSettings.dzLootRange) < lootRange) lootRange = float(gSettings.dzLootRange);
         const bool whitelist = loot::filter().mode == loot::FilterWhite;
@@ -2563,6 +2508,7 @@ void dzReadLoop() {
     ULONGLONG lastSpeed = lastAlive;
     constexpr ULONGLONG kSpeedMs = 30000;
     int miss = 0;
+    const char* lastAliveDetail = nullptr;
 #ifndef HIRSCHGANGWARE_NO_DIAG
     LARGE_INTEGER qpf;
     QueryPerformanceFrequency(&qpf);
@@ -2580,9 +2526,15 @@ void dzReadLoop() {
         const ULONGLONG t = GetTickCount64();
         if (t - lastAlive >= 500) {
             lastAlive = t;
-            if (gProc->alive()) miss = 0;
-            else if (++miss >= 4) {
-                logLine("[log] game process gone on the target (%d checks)", miss);
+            const bool alive = gProc->alive();
+            miss = alive ? 0 : miss + 1;
+            const char* detail = gProc->aliveDetail();
+            if (detail != lastAliveDetail || miss == 1 || miss == 4) {
+                logLine("[dma] liveness: %s; failed checks=%d", detail, miss);
+                lastAliveDetail = detail;
+            }
+            if (miss >= 4) {
+                logLine("[log] target/DMA liveness failed (%d checks): %s", miss, detail);
                 gDzGone = true;
                 break;
             }
@@ -2881,6 +2833,14 @@ bool drawDayzFrame() {
             }
             trigger::removeFriends(gDzTriggerRegions);
             trigger::update(gDzTriggerRegions, ccx, ccy, true);
+            static uint64_t lastHeadLog = 0;
+            if ((trigger::live().keyHeld || trigger::cfg().showDebug) && nowUs-lastHeadLog>=1000000) {
+                lastHeadLog=nowUs;
+                const auto& probe=trigger::live().head;
+                logLine("[trigger-head] %s; range=%.1fm gap=%.4fm poseAge=%.1fms radius=%.3fpx offset=%.3fpx target=%d bone=%d dwell=%d/%dms limit=%dm",
+                        probe.reason,probe.range,probe.gap,probe.ageMs,probe.radiusPx,probe.offsetPx,
+                        int(trigger::live().target),trigger::live().bone,trigger::live().heldMs,trigger::cfg().delayMs,trigger::cfg().maxDistM);
+            }
             static std::string lastRxSeen;
             if (trigger::cfg().showDebug && trigger::live().lastRx != lastRxSeen) {
                 lastRxSeen = trigger::live().lastRx;
@@ -2916,6 +2876,8 @@ bool drawDayzFrame() {
         gDzDbgBones.clear();
 #endif
         trigger::update({}, 0.f, 0.f, false);
+        trigger::live().head = {};
+        trigger::live().head.reason = "camera unavailable";
         static std::string lastRxSeen2;
         if (trigger::cfg().showDebug && trigger::live().lastRx != lastRxSeen2) {
             lastRxSeen2 = trigger::live().lastRx;
@@ -3250,17 +3212,20 @@ void drawDzRadar(Canvas& cv) {
 }
 
 void drawScene(Canvas& cv) {
-    if (gDma && !gFull) {
+    const clutch::Policy policy{clutch::runtime().active, gSettings.clutch.realBonesOnly};
+    if (policy.extras() && gDma && !gFull) {
         cv.pen(RGB(70, 70, 70), 1);
         cv.rect(gView.left, gView.top, gView.right, gView.bottom);
     }
-    if (gSettings.fps) {
+    if (policy.extras() && gSettings.fps) {
         char fps[24];
         std::snprintf(fps, sizeof fps, "%d FPS", gFps);
         cv.text(fps, {gView.left + 7, gView.top + 7, gView.right, gView.top + 27}, RGB(1, 1, 1), DT_LEFT | DT_TOP);
         cv.text(fps, {gView.left + 6, gView.top + 6, gView.right, gView.top + 26}, RGB(255, 220, 80), DT_LEFT | DT_TOP);
     }
     for (const auto& b : gBoxes) {
+        const bool realBones = b.skel.ok[DJ_Pelvis] && b.skel.ok[DJ_Neck];
+        if (!policy.entity(b.kind, realBones)) continue;
         const COLORREF col = b.kind == 1 && b.enemy ? gSettings.enemyColor : dzKindColor(b.kind, b.enemy);
         const auto caption = [&](const char* text, const RECT& bounds, UINT align) {
             for (const POINT offset : {POINT{-1, 0}, POINT{1, 0}, POINT{0, -1}, POINT{0, 1}}) {
@@ -3291,20 +3256,20 @@ void drawScene(Canvas& cv) {
             cv.pen(col, 1);
             draw();
         };
-        if (opt.box) outlined([&] { cv.rect(l, t, r, btm); });
-        if (opt.skeleton && b.skel.ok[DJ_Pelvis] && b.skel.ok[DJ_Neck]) {
+        if (policy.extras() && opt.box) outlined([&] { cv.rect(l, t, r, btm); });
+        if (policy.skeleton(opt.skeleton) && realBones) {
             const Skeleton& s = b.skel;
             outlined([&] {
                 for (const auto& bone : dz::kDzSkelBones) {
                     if (!s.ok[bone.first] || !s.ok[bone.second]) continue;
                     cv.line(s.pt[bone.first].x, s.pt[bone.first].y, s.pt[bone.second].x, s.pt[bone.second].y);
                 }
-                if (s.headRadius && s.ok[DJ_Head]) {
-                    const POINT c = s.pt[DJ_Head];
-                    cv.ellipse(c.x - s.headRadius, c.y - s.headRadius, c.x + s.headRadius, c.y + s.headRadius);
-                }
             });
-        } else if (opt.skeleton) {
+            if (s.head.valid && s.ok[DJ_Head]) {
+                cv.pen(col,1);
+                cv.ellipseF(s.head.x,s.head.y,s.head.rx,s.head.ry);
+            }
+        } else if (policy.skeleton(opt.skeleton)) {
             const int bw = r - l, bh = btm - t;
             auto px = [&](int j) { return POINT{LONG(l + kStick[j].nx * bw), LONG(t + kStick[j].ny * bh)}; };
             const int hr = std::max(2, bw / 6);
@@ -3319,6 +3284,15 @@ void drawScene(Canvas& cv) {
             });
         }
 
+        if (!policy.extras()) {
+            // Clutch keeps a compact distance label, independent of normal Info.
+            if (std::isfinite(b.dist) && b.dist >= 0) {
+                char distance[24];
+                std::snprintf(distance, sizeof distance, "%.0fm", b.dist);
+                caption(distance, {l - 40, btm + 1, r + 40, btm + 16}, DT_CENTER | DT_TOP);
+            }
+            continue;
+        }
         if (opt.names) caption(b.e.name.c_str(), {l - 80, t - 16, r + 80, t - 1}, DT_CENTER | DT_BOTTOM);
         if (opt.info) {
             char info[64];
@@ -3332,6 +3306,16 @@ void drawScene(Canvas& cv) {
         }
     }
 
+    const auto drawCrosshair = [&] {
+        if (gSettings.crosshair) {
+            crosshair::draw(gView, gSettings.crosshairStyle, gSettings.crosshairSize, gSettings.crosshairColor,
+                            [&](const RECT& bounds, COLORREF color) { cv.fill(bounds, color); });
+        }
+    };
+    if (!policy.extras()) {
+        drawCrosshair();
+        return;
+    }
     if (trigger::cfg().showRegions) {
         const float cx = crosshair::center(gView.left, gView.right), cy = crosshair::center(gView.top, gView.bottom);
         const auto match = trigger::targetAt(trigger::cfg(), gDzTriggerRegions, cx, cy);
@@ -3378,10 +3362,7 @@ void drawScene(Canvas& cv) {
     }
 #endif
 
-    if (gSettings.crosshair) {
-        crosshair::draw(gView, gSettings.crosshairStyle, gSettings.crosshairSize, gSettings.crosshairColor,
-                        [&](const RECT& bounds, COLORREF color) { cv.fill(bounds, color); });
-    }
+    drawCrosshair();
 }
 
 void paint(HDC hdc, int w, int h) {
@@ -3437,6 +3418,9 @@ PanelInfo espInfo() {
 void destroyRadarScreen();
 
 void stopEsp() {
+    clutch::runtime().cancelBinding();
+    gClutchBones.store(false, std::memory_order_relaxed);
+    trigger::setRemoteInputNeeded(false);
     if (gRun == Run::Attaching) {
         if (gCancel) *gCancel = true;
         gRun = Run::Stopping;
@@ -3686,6 +3670,10 @@ void syncRadarScreen() {
     cfg.headings = gSettings.dzRadarHeadings;
     cfg.headingLen = gSettings.dzRadarHeadingLen;
     cfg.esp.skeleton = gSettings.skeleton;
+    cfg.esp.clutch = gSettings.clutch;
+    cfg.esp.clutchActive = clutch::runtime().active;
+    cfg.esp.clutchReady = clutch::runtime().ready;
+    cfg.esp.clutchBinding = clutch::runtime().binding;
     cfg.esp.box = gSettings.box;
     cfg.esp.names = gSettings.names;
     cfg.esp.distance = gSettings.info;
@@ -3758,6 +3746,8 @@ void syncRadarScreen() {
         SetForegroundWindow(gPanel);
     }
     if (cfg.changed) {
+        gSettings.clutch = clutch::validated(cfg.esp.clutch);
+        clutch::runtime().configure(gSettings.clutch);
         gSettings.dzLoot = cfg.loot;
         gSettings.dzLootCats = cfg.lootMask;
         gSettings.dzRadarStashLoot = cfg.stashLootMask;
@@ -3810,6 +3800,11 @@ void syncRadarScreen() {
         gSettings.dzMapTopo = cfg.mapTopo;
         gSettings.dzMapHigh = cfg.mapHigh;
         saveSettingsSoon();
+    }
+    if (cfg.esp.clutchCancel) clutch::runtime().cancelBinding();
+    if (cfg.esp.clutchBind) {
+        trigger::stopCapture();
+        clutch::runtime().beginBinding();
     }
     if (wantShow && !want) {
         gSettings.dzRadarScreen = false;
@@ -4286,7 +4281,19 @@ int main(int argc, char** argv) {
             tabWas = tabDown;
         }
         if (gRun == Run::Running && gOverlay) {
+            auto& clutchState = clutch::runtime();
+            clutchState.configure(gSettings.clutch);
+            gClutchBones.store(gSettings.clutch.enabled && clutch::bindable(gSettings.clutch.key), std::memory_order_relaxed);
+            trigger::setRemoteInputNeeded(gDma && (gSettings.clutch.enabled || clutchState.binding));
             trigger::pollInputs();
+            clutchState.update(gDma ? trigger::remoteSample() : dma_keyboard::Sample{}, gDma,
+                               trigger::capturing(), (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0);
+            if (clutchState.boundKey) {
+                gSettings.clutch.key = clutchState.boundKey;
+                clutchState.boundKey = 0;
+                clutchState.configure(gSettings.clutch);
+                saveSettingsSoon();
+            }
             runFrame();
             if (!gGpu && !gSettings.uncapped && FAILED(DwmFlush())) Sleep(5);
         } else {

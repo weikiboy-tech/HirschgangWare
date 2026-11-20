@@ -1,0 +1,12 @@
+LIBRARY vmm
+EXPORTS
+    TestMode
+    VMMDLL_Initialize
+    VMMDLL_Close
+    VMMDLL_MemFree
+    VMMDLL_PidGetFromName
+    VMMDLL_Map_GetModuleFromNameU
+    VMMDLL_Map_GetVadU
+    VMMDLL_ConfigSet
+    VMMDLL_ProcessGetInformation
+    VMMDLL_MemReadEx

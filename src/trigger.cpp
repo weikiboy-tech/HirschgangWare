@@ -819,6 +819,7 @@ dma_keyboard::Sample (*gRemoteKeys)() = nullptr;
 dma_keyboard::Sample gRemote;
 dma_keyboard::Bitmap gRemoteInitiallyDown;
 ULONGLONG gRemoteAt = 0;
+bool gRemoteInputNeeded = false;
 
 bool usesRemote(int slot) {
     const auto b = binding(slot);
@@ -837,7 +838,7 @@ bool remoteInitiallyDown(int key) {
 }
 
 void sampleRemote(ULONGLONG now) {
-    if (!gRemoteKeys || (!gCapture && !usesRemote(0) && !usesRemote(1))) {
+    if (!gRemoteKeys || (!gRemoteInputNeeded && !gCapture && !usesRemote(0) && !usesRemote(1))) {
         gRemote = {};
         gRemoteAt = 0;
         return;
@@ -915,6 +916,8 @@ bool boundDown(int slot) {
 }  // namespace
 
 void setRemoteKeys(dma_keyboard::Sample (*fn)()) { gRemoteKeys = fn; }
+void setRemoteInputNeeded(bool needed) { gRemoteInputNeeded = needed; }
+dma_keyboard::Sample remoteSample() { return gRemote; }
 void setLocalKeyReader(bool (*fn)(int)) { gLocalKeyReader = fn; }
 
 void pollInputs() {

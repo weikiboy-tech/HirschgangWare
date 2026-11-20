@@ -173,6 +173,14 @@ public:
         const float rx = (r - l - 1) / 2.f, ry = (b - t - 1) / 2.f;
         dc_->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(l + .5f + rx, t + .5f + ry), rx, ry), brush_.Get(), float(penWidth_), round_.Get());
     }
+    void ellipseF(float cx,float cy,float rx,float ry) override {
+        if (!(rx>0 && ry>0)) return;
+        stroke();
+        const auto previous=dc_->GetAntialiasMode();
+        dc_->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+        dc_->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(cx,cy),rx,ry),brush_.Get(),float(penWidth_),round_.Get());
+        dc_->SetAntialiasMode(previous);
+    }
     void roundRect(int l, int t, int r, int b, int cw, int ch) override {
         stroke();
         dc_->DrawRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(l + .5f, t + .5f, r - .5f, b - .5f), cw / 2.f, ch / 2.f), brush_.Get(),

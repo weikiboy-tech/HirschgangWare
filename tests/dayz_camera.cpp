@@ -77,6 +77,42 @@ void testBodyRegions() {
     }
     std::vector<trigger::Cand> regions;
     const trigger_geometry::Viewport viewport{0,0,1920,1080};
+    // Head-only tests at actual long distances, including subpixel footprints.
+    for (const float distance : {50.f,150.f,300.f,354.f,600.f,1000.f}) for (const float lens : {1.f,.2f,.04f}) {
+        auto distant=body;for (auto& joint:distant) joint.z=distance;
+        Cam view=camera;view.pos.y=1.7f;view.px=lens;view.py=lens*.5625f;
+        trigger::Cand who=identity;who.dist=distance;
+        trigger::Config headOnly;headOnly.hitMask=trigger::H_Head;headOnly.maxDistM=1000;headOnly.radiusPx=0;
+        std::vector<trigger::Cand> farRegions;
+        trigger_geometry::appendBody(view,viewport,distant,1000000,1001000,who,farRegions);
+        const auto shape=trigger_geometry::headShape(distant);
+        const auto displayed=trigger_geometry::projectDisc(view,viewport,shape.center,shape.radius);
+        assert(displayed.valid);
+        const auto head=std::find_if(farRegions.begin(),farRegions.end(),[](const auto& r){return r.bone==0;});
+        assert(head!=farRegions.end());
+        float left=INFINITY,right=-INFINITY,top=INFINITY,bottom=-INFINITY;
+        for(unsigned i=0;i<head->regionSize;++i) {
+            left=std::min(left,head->region[i].x);right=std::max(right,head->region[i].x);
+            top=std::min(top,head->region[i].y);bottom=std::max(bottom,head->region[i].y);
+        }
+        assert(std::abs(left-(displayed.x-displayed.rx))<.002f && std::abs(right-(displayed.x+displayed.rx))<.002f);
+        assert(std::abs(top-(displayed.y-displayed.ry))<.002f && std::abs(bottom-(displayed.y+displayed.ry))<.002f);
+        float hx=0,hy=0;assert(toScreen(view,distant[0],1920,1080,hx,hy));
+        const auto match=trigger::targetAt(headOnly,farRegions,hx,hy);
+        assert(match.candidate && match.candidate->bone==0);
+        assert(toScreen(view,{.07f,1.7f,distance},1920,1080,hx,hy));
+        assert(trigger::targetAt(headOnly,farRegions,hx,hy).candidate);
+        assert(toScreen(view,{.14f,1.7f,distance},1920,1080,hx,hy));
+        assert(!trigger::targetAt(headOnly,farRegions,hx,hy).candidate);
+        headOnly.maxDistM=354;
+        assert(toScreen(view,distant[0],1920,1080,hx,hy));
+        assert(bool(trigger::targetAt(headOnly,farRegions,hx,hy).candidate)==(distance<=354));
+    }
+    Cam hip=camera;hip.px=1.279907f;hip.py=.719948f;
+    const auto measured=trigger_geometry::headShape({0,1.67f,100},{0,1.5f,100});
+    const auto smallHead=trigger_geometry::projectDisc(hip,viewport,measured.center,measured.radius);
+    assert(smallHead.valid && smallHead.rx>.63f && smallHead.rx<.65f);
+    assert(smallHead.rx<2.f); // No minimum two-pixel head or integer center truncation.
     trigger_geometry::appendBody(camera,viewport,body,1000000,1075000,identity,regions);
     assert(regions.empty()); // Exact freshness boundary.
     trigger_geometry::appendBody(camera,viewport,body,1000000,999999,identity,regions);

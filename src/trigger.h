@@ -148,6 +148,11 @@ inline TargetMatch targetAt(const Config& cfg, const std::vector<Cand>& cands, f
 }
 
 struct Live {
+    struct HeadProbe {
+        const char* reason = "no sampled player in trigger range";
+        float range = 0, gap = 0, ageMs = 0, radiusPx = 0, offsetPx = INFINITY;
+        bool isFriend = false;
+    } head;
     bool projectionReady = false;
     bool target = false;
     float dist = 0;
@@ -196,6 +201,9 @@ void setLog(void (*fn)(const char*));
 void setRemoteKeys(dma_keyboard::Sample (*fn)());
 void setLocalKeyReader(bool (*fn)(int)); // Optional adapter; defaults to GetAsyncKeyState.
 void pollInputs();
+// Shared read-only remote snapshot, also usable without trigger bindings.
+void setRemoteInputNeeded(bool needed);
+dma_keyboard::Sample remoteSample();
 bool remoteKeysReady();
 const char* keySourceLabel(int slot = 0);
 const std::string& ident();

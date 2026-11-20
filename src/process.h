@@ -33,6 +33,7 @@ public:
     virtual bool readable(uintptr_t addr) const = 0;
     virtual std::vector<Region> regions(uint64_t maxAddr) const = 0;
     virtual bool alive() const = 0;
+    virtual const char* aliveDetail() const { return "OS process handle"; }
 
     template <class T>
     bool read(uintptr_t addr, T& out) const { return read(addr, &out, sizeof(T)); }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <windows.h>
+#include <cmath>
 
 #include <memory>
 #include <string>
@@ -11,6 +12,12 @@ struct Canvas {
     virtual void line(int x0, int y0, int x1, int y1) = 0;
     virtual void rect(int l, int t, int r, int b) = 0;
     virtual void ellipse(int l, int t, int r, int b) = 0;
+    // GDI raster fallback; GPU overrides this to retain subpixel geometry.
+    virtual void ellipseF(float cx,float cy,float rx,float ry) {
+        const int l=int(std::floor(cx-rx)),t=int(std::floor(cy-ry));
+        const int r=int(std::ceil(cx+rx)),b=int(std::ceil(cy+ry));
+        if (r>l && b>t) ellipse(l,t,r,b);
+    }
     virtual void roundRect(int l, int t, int r, int b, int cw, int ch) = 0;
     virtual void polyline(const POINT* p, int n) = 0;
     virtual void fill(const RECT& r, COLORREF c) = 0;

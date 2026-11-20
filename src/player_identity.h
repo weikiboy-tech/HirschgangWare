@@ -37,7 +37,8 @@ inline std::string text(const uint8_t* bytes, size_t capacity) {
 using Names = std::unordered_map<uint32_t, std::string>;
 inline void insert(Names& names, std::unordered_set<uint32_t>& conflicts, uint32_t id, const std::string& name) {
     if (!id || name.empty() || conflicts.count(id)) return;
-    if (!names.emplace(id, name).second) {
+    const auto inserted = names.emplace(id, name);
+    if (!inserted.second && inserted.first->second != name) {
         names.erase(id);
         conflicts.insert(id);
     }
@@ -48,7 +49,7 @@ inline std::string key(std::string name) {
     return name;
 }
 
-// Repeated IDs and names are ambiguous, including a collision with the local player.
+// Multiple entity claims and repeated names are ambiguous, including the local player.
 inline std::unordered_map<uint64_t, std::string> resolve(
         const Names& roster, const std::unordered_map<uint64_t, uint32_t>& entities) {
     std::unordered_map<uint32_t, unsigned> claims;
