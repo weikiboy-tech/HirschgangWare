@@ -150,6 +150,7 @@ void loadSettings(EspSettings& s) {
     s.displayH = GetPrivateProfileIntA(readSection(), "display_height", s.displayH, readIniPath().c_str());
     s.skeleton = readBool("skeleton", s.skeleton);
     s.clutch = clutch::load([](const char* key, const char* fallback) { return readString(key, fallback); });
+    s.assist = aim_assist::load([](const char* key, const char* fallback) { return readString(key, fallback); });
     s.fps = readBool("fps", s.fps);
     s.uncapped = readBool("uncapped", s.uncapped);
     s.predictMs = GetPrivateProfileIntA(readSection(), "predict_ms", s.predictMs, readIniPath().c_str());
@@ -232,6 +233,7 @@ void saveSettings(const EspSettings& s) {
     writeString("display_height", std::to_string(s.displayH));
     writeBool("skeleton", s.skeleton);
     clutch::save(s.clutch, [](const char* key, const std::string& value) { writeString(key, value); });
+    aim_assist::save(s.assist, [](const char* key, const std::string& value) { writeString(key, value); });
     writeBool("fps", s.fps);
     writeBool("uncapped", s.uncapped);
     writeString("predict_ms", std::to_string(s.predictMs));

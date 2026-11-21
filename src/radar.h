@@ -12,6 +12,7 @@
 #include "radar_events.h"
 #include "crosshair.h"
 #include "clutch.h"
+#include "aim_assist.h"
 #include "player_health.h"
 #include "webmap.h"
 
@@ -105,6 +106,9 @@ struct Config {
     std::string downloadReq;
     bool cancelReq = false;
     struct Esp {
+        aim_assist::Config assist;
+        bool assistBind=false,assistCancel=false;
+        bool assistSetupStart=false,assistSetupCancel=false,assistSetupReset=false;
         clutch::Config clutch;
         bool clutchActive = false, clutchReady = false, clutchBinding = false;
         bool clutchBind = false, clutchCancel = false;

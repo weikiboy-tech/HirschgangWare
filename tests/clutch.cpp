@@ -9,6 +9,8 @@
 dma_keyboard::Sample remote;
 int reads=0;
 dma_keyboard::Sample sample() { ++reads;return remote; }
+// Sleep(9) need not advance coarse GetTickCount64 by the production 8 ms gate.
+void waitForInputTick() {const auto before=GetTickCount64();while(GetTickCount64()-before<9)Sleep(1);}
 void press(int key, bool down) {
     const auto mask=uint8_t(1u << (2*(key%4)));
     if (down) remote.bits[size_t(key)/4]|=mask;else remote.bits[size_t(key)/4]&=uint8_t(~mask);
@@ -58,19 +60,19 @@ int main() {
     trigger::setRemoteKeys(sample);trigger::setRemoteInputNeeded(true);
     trigger::pollInputs();assert(reads==1 && trigger::remoteSample().pid==remote.pid);
     state.configure(config);state.update(trigger::remoteSample(),true);
-    press(67,true);Sleep(9);trigger::pollInputs();state.update(trigger::remoteSample(),true);
+    press(67,true);waitForInputTick();trigger::pollInputs();state.update(trigger::remoteSample(),true);
     assert(state.active && !trigger::live().keyHeld);
-    remote={};Sleep(9);trigger::pollInputs();state.update(trigger::remoteSample(),true);
+    remote={};waitForInputTick();trigger::pollInputs();state.update(trigger::remoteSample(),true);
     assert(!state.active);
     trigger::setRemoteInputNeeded(false);trigger::pollInputs();assert(!trigger::remoteSample().pid);
 
     trigger::cfg().key=67;trigger::cfg().keySource=trigger::InputSource::MainPc;
     trigger::cfg().secondary={68,0,trigger::InputSource::MainPc};
     trigger::setRemoteInputNeeded(true);remote.pid=125;
-    Sleep(9);trigger::pollInputs();state.configure(config);state.update(trigger::remoteSample(),true);
-    press(67,true);press(68,true);Sleep(9);trigger::pollInputs();state.update(trigger::remoteSample(),true);
+    waitForInputTick();trigger::pollInputs();state.configure(config);state.update(trigger::remoteSample(),true);
+    press(67,true);press(68,true);waitForInputTick();trigger::pollInputs();state.update(trigger::remoteSample(),true);
     assert(state.active && trigger::live().boundHeld[0] && trigger::live().boundHeld[1]);
-    press(67,false);Sleep(9);trigger::pollInputs();state.update(trigger::remoteSample(),true);
+    press(67,false);waitForInputTick();trigger::pollInputs();state.update(trigger::remoteSample(),true);
     assert(!state.active && !trigger::live().boundHeld[0] && trigger::live().boundHeld[1]);
     state.beginBinding();trigger::startCapture();
     state.update(trigger::remoteSample(),true,trigger::capturing());assert(!state.binding);

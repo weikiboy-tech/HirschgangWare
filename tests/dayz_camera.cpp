@@ -8,6 +8,7 @@
 
 #include <winsock2.h>
 #include <windows.h>
+#include "../src/clock.h"
 #include "../src/crosshair.h"
 
 #include <array>
@@ -455,11 +456,13 @@ int main() {
     timeval immediate{};
     assert(select(0, &readSet, nullptr, nullptr, &immediate) == 0 && live.clicks == 0);
 
+    unsigned receivedPackets=0;
     const auto receive = [&](const std::string& expected) {
+        ++receivedPackets;
         char packet[64];
         const int size = recv(receiver, packet, sizeof packet, 0);
-        if (size <= 0) std::fprintf(stderr, "Expected %s, recv error %d, output status: %s\n",
-                                    expected.c_str(), WSAGetLastError(), live.clickStatus.c_str());
+        if (size <= 0) std::fprintf(stderr, "Packet %u expected %s, recv error %d, target=%d held=%d dwell=%d, output status: %s\n",
+            receivedPackets,expected.c_str(), WSAGetLastError(),int(live.target),int(live.keyHeld),live.heldMs,live.clickStatus.c_str());
         assert(size > 0);
         assert(std::string(packet, static_cast<size_t>(size)) == expected);
     };
@@ -543,9 +546,20 @@ int main() {
     trigger::update(enemies,639.5f,359.5f,true);
     receive(output.cmdUp);
     assert(!live.target && live.clicks == 6);
+    const auto oldDown=output.cmdDown;
+    assert(trigger::moveRelative(3,-2,qpcUs()+100000,true));receive("km.move_now(3,-2)");
+    assert(live.clicks==6 && !live.target);
+    assert(!trigger::moveRelative(3,2,qpcUs()-1,true));
+    assert(!trigger::moveRelative(3,2,qpcUs()+100000,false));
+    assert(!trigger::moveRelative(128,0,qpcUs()+100000,true));
+    trigger::clickOnce();receive(oldDown);
+    assert(!trigger::moveRelative(1,0,qpcUs()+100000,true)); // Pending click/up has priority.
+    trigger::update({},639.5f,359.5f,true);receive(output.cmdUp);
+    assert(live.clicks==7);
+    assert(trigger::moveRelative(-1,0,qpcUs()+100000,true));receive("km.move_now(-1,0)");
     output.cmdDown.clear();
     trigger::clickOnce();
-    assert(live.clicks == 6 && !live.clickStatus.empty());
+    assert(live.clicks == 7 && !live.clickStatus.empty());
     trigger::disconnectDevice();
     closesocket(receiver);
     WSACleanup();

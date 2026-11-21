@@ -5,6 +5,7 @@
 // The box also reports the physical mouse/keyboard, so the trigger key is the
 // one on the *gaming* keyboard (works PC to PC). Device config lives in trigger.ini.
 #include "keyboard_bitmap.h"
+#include "aim_motion_protocol.h"
 
 #include <cmath>
 #include <algorithm>
@@ -208,6 +209,21 @@ bool remoteKeysReady();
 const char* keySourceLabel(int slot = 0);
 const std::string& ident();
 void sendRaw(const std::string& cmd);
+// Synchronous, no-queue motion on the existing owner/connection. Never clicks.
+// Caller must verify firmware semantics and sensitivity before enabling output.
+bool moveRelative(int dx, int dy, uint64_t deadlineUs, bool verifiedImmediate);
+bool motionDeviceReady(); // Known MAKCU identity on the existing serial connection.
+bool motionSetupAvailable();
+bool beginMotionSetup(); // Called only after explicit UI confirmation; never emits a movement.
+bool beginMotionRestore(); // Read-only channel verification for a measured profile.
+bool calibrationMove(int dx,int dy,uint64_t deadlineUs);
+void endMotionSetup(bool measured);
+void serviceMotion(); // Nonblocking query on the existing owner; no second reader/writer.
+const aim_assist::MotionProtocol& motionFeedback();
+bool motionPhysicalBusy();
+void completeMotionInterval(uint64_t now,bool isolatedResponse=false);
+void pauseMotionOutput(const char* reason);
+bool resumeMotionOutput();
 int monitorPresetCount();
 const char* monitorPresetText(int i);
 void monitorPreset(int i);

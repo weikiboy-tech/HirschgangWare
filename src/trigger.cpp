@@ -5,6 +5,7 @@
 #endif
 #include <winsock2.h>
 #include <windows.h>
+#include "clock.h"
 
 #include <algorithm>
 #include <cctype>
@@ -38,6 +39,8 @@ ULONGLONG gLastEscapeCancelAt = 0;
 void (*gLog)(const char*) = nullptr;
 std::string gIdent;
 bool gAwaitIdent = false;
+aim_assist::MotionProtocol gMotion;
+bool gMotionSetup=false;
 std::string gLastLoggedRx;
 ULONGLONG gLastRxLog = 0;
 // MAKCU binary frame receive state
@@ -301,6 +304,7 @@ void maskReport(uint8_t m) {
 void textLineDone() {
     if (gRxLine.empty()) return;
     const std::string line = gRxLine;
+    const bool motionReply=gMotion.reply(line,qpcUs());
     gRxLine.clear();
     gLive.lastRx = line;
     const ULONGLONG now = GetTickCount64();
@@ -314,7 +318,7 @@ void textLineDone() {
         gAwaitIdent = false;
         tlog("[trg] box ident: %s", gIdent.c_str());
     }
-    parseLine(line);
+    if(!motionReply)parseLine(line);
 }
 
 // byte stream: text lines AND MAKCU binary frames (DE AD lenLE16 cmd payload)
@@ -491,6 +495,7 @@ std::vector<std::string> portsImpl() {
 }
 
 void closeDevice() {
+    gMotion.reset();gMotionSetup=false;
     gBoxHidDown.fill(false);
     std::fill(std::begin(gBtn), std::end(gBtn), false);
     gKeyHeld = false;
@@ -760,6 +765,60 @@ bool capturing() { return gCapture; }
 void setLog(void (*fn)(const char*)) { gLog = fn; }
 const std::string& ident() { return gIdent; }
 void sendRaw(const std::string& cmd) { if (!cmd.empty()) deviceSend(cmd); }
+bool motionDeviceReady() { return gSerial!=INVALID_HANDLE_VALUE && !gCfg.modeNet && gIdent.find("MAKCU")!=std::string::npos; }
+bool motionSetupAvailable() {
+    // Bare scalar replies can only be attributed with one query owner.
+    // Existing key polling is not paused/modified by the new feature.
+    return motionDeviceReady() && !gCapture && !probing() && !gDownAt &&
+        !(boxInputEnabled() && !gCfg.cmdKeyPoll.empty());
+}
+const aim_assist::MotionProtocol& motionFeedback(){return gMotion;}
+bool motionPhysicalBusy(){
+    return std::any_of(std::begin(gBtn),std::end(gBtn),[](bool b){return b;}) ||
+        std::any_of(gBoxHidDown.begin(),gBoxHidDown.end(),[](bool b){return b;});
+}
+bool beginMotionSetup(){
+    if(!motionSetupAvailable())return false;
+    gMotion.begin();gMotionSetup=true;return true;
+}
+bool beginMotionRestore(){
+    return motionSetupAvailable() && gMotion.beginRestore();
+}
+void endMotionSetup(bool measured){
+    if(measured && gMotionSetup && !gMotion.fault){gMotion.verified=true;gMotionSetup=false;}
+    else {gMotion.cancel();gMotionSetup=false;}
+}
+void serviceMotion(){
+    if(!motionDeviceReady()){gMotion.reset();gMotionSetup=false;return;}
+    if(!motionSetupAvailable())return; // Existing clicks retain priority.
+    if(gMotion.queryDue(qpcUs()) && !deviceSend(gMotion.queryCommand()))gMotion.fail("MAKCU query write failed");
+}
+void completeMotionInterval(uint64_t now,bool isolatedResponse){gMotion.intervalCompleted(now,isolatedResponse);}
+void pauseMotionOutput(const char* reason){gMotion.pause(reason);}
+bool resumeMotionOutput(){
+    if(!motionSetupAvailable() || !gMotion.resume())return false;
+    serviceMotion();return true; // Read-only positive control; never a movement.
+}
+bool calibrationMove(int dx,int dy,uint64_t deadlineUs){
+    if(!gMotionSetup || !motionSetupAvailable() || !gMotion.idleFresh(qpcUs()) || qpcUs()>deadlineUs ||
+       (!dx&&!dy)||std::abs(dx)>16||std::abs(dy)>16||(dx&&dy))return false;
+    char command[64];std::snprintf(command,sizeof command,gMotion.cameraOnly?"km.move(%d,%d)":"km.move_now(%d,%d)",dx,dy);
+    if(!deviceSend(command)){gMotion.fail("Calibration write failed");return false;}
+    gMotion.moved(true);return true;
+}
+bool moveRelative(int dx, int dy, uint64_t deadlineUs, bool verifiedImmediate) {
+    if (!verifiedImmediate || !connected() || (!dx && !dy) || dx < -127 || dx > 127 || dy < -127 || dy > 127 ||
+        qpcUs()>deadlineUs || gCapture || gDownAt) return false;
+    if(!gCfg.modeNet && (!motionDeviceReady() || !gMotion.verified || !gMotion.idleFresh(qpcUs())))return false;
+    // Existing click/up processing runs first. No second writer, device queue,
+    // km.silent, locks, masks or button state mutations are introduced here.
+    char command[64];
+    std::snprintf(command,sizeof command,!gCfg.modeNet&&gMotion.cameraOnly?"km.move(%d,%d)":"km.move_now(%d,%d)",dx,dy);
+    const bool sent=deviceSend(command);
+    if(!sent&&!gCfg.modeNet)gMotion.fail("MAKCU movement write failed");
+    if(sent&&!gCfg.modeNet)gMotion.moved();
+    return sent;
+}
 int monitorPresetCount() { return 7; }
 const char* monitorPresetText(int i) {
     static const char* const t[7] = {"km.monitor(1,0,0)", "km.monitor(2,0,0)", "km.monitor(3,0,0)", "km.monitor(4,0,0)",

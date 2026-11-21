@@ -4,6 +4,7 @@
 #include "brand.h"
 #include "friends.h"
 #include "trigger.h"
+#include "clock.h"
 
 #include <windowsx.h>
 
@@ -255,6 +256,11 @@ void setMapSampler(const ImDrawList*, const ImDrawCmd*) {
 }
 
 LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && wp == VK_ESCAPE && aim_assist::runtime().calibration.running()) {
+        aim_assist::runtime().calibration.cancel();aim_assist::runtime().calibrationStart=false;
+        trigger::endMotionSetup(false);return 0;
+    }
+    if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && wp == VK_ESCAPE && aim_assist::runtime().hotkey.cancelEscape()) return 0;
     if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && wp == VK_ESCAPE && clutch::runtime().cancelEscape()) return 0;
     if ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && wp == VK_ESCAPE && trigger::cancelCaptureEscape()) return 0;
     if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wp, lp)) return true;
@@ -1356,6 +1362,110 @@ void vkLabel(char* out, size_t n, int k) {
 
 void keyLabel(char* out, size_t n, int slot = 0) { vkLabel(out, n, trigger::binding(slot).key); }
 
+void drawAimAssist(Config::Esp& esp,bool& changed) {
+    auto& config=esp.assist;
+    auto& runtime=aim_assist::runtime();
+    const auto& live=runtime.engine.live();
+    ImGui::PushID("aim-assist");
+    ImGui::SeparatorText("AIM ASSIST");
+    changed|=switchRow("Enable aim assist",&config.enabled);
+    char key[64],button[128];vkLabel(key,sizeof key,config.key);
+    std::snprintf(button,sizeof button,runtime.hotkey.binding?"Press Main-PC key (Esc cancels)##bind":"Hold key: %s##bind",config.key?key:"Press to bind");
+    if(chip(button,runtime.hotkey.binding,std::max(100.f,ImGui::GetContentRegionAvail().x-60.f))) {
+        if(runtime.hotkey.binding)esp.assistCancel=true;else esp.assistBind=true;
+    }
+    ImGui::SameLine();ImGui::BeginDisabled(!config.key && !runtime.hotkey.binding);
+    if(chip("Clear",false,52.f)){config.key=0;esp.assistCancel=true;changed=true;}
+    ImGui::EndDisabled();
+    changed|=switchRow("Dry run (no mouse output)",&config.dryRun);
+    const auto slider=[&](const char* id,double& value,float lo,float hi,const char* format){float number=float(value);ImGui::SetNextItemWidth(-1);if(ImGui::SliderFloat(id,&number,lo,hi,format)){value=number;changed=true;}};
+    slider("##smoothing",config.smoothMs,10,500,"smoothing %.0f ms");
+    slider("##strength",config.strength,0,1,"strength %.2f");
+    changed|=switchRow("Movement prediction",&config.motionPrediction);
+    if(config.motionPrediction){
+        slider("##prediction-amount",config.predictionAmount,25,150,"prediction %.0f%%");
+        if(ImGui::IsItemHovered())ImGui::SetTooltip("Lead based on observed player movement. No projectile drop calculation.");
+    }
+    slider("##area",config.radiusPx,10,600,"acquisition %.0f px");
+    changed|=switchRow("Show search circle",&config.showArea);
+    if(ImGui::IsItemHovered())ImGui::SetTooltip("Draw the radius around the crosshair. Target acquisition uses the radius either way.");
+    int point=config.point==0?0:1;ImGui::SetNextItemWidth(130.f);
+    if(ImGui::Combo("Aim point",&point,"Head\0Chest\0")){config.point=point==0?0:2;changed=true;}
+    // Status messages vary with live targets. Reserve their height so the setup
+    // buttons cannot jump under the pointer between mouse-down and mouse-up.
+    ImGui::BeginChild("assist-readiness",ImVec2(0,ImGui::GetTextLineHeightWithSpacing()*16+8),ImGuiChildFlags_None);
+    ImGui::PushTextWrapPos(0.f);
+    ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(live.active?th::Accent:th::Text),"%s",runtime.hotkey.binding?"BINDING":live.status);
+    ImGui::PopTextWrapPos();
+    ImGui::Separator();
+    ImGui::TextWrapped("Input: %s",runtime.hotkey.binding?"BINDING":runtime.hotkey.ready?"READY":"NO MAIN-PC INPUT");
+    if(!config.enabled)ImGui::TextUnformatted("Target: feature disabled");
+    else if(runtime.calibration.running())ImGui::TextUnformatted("Target: following paused for setup");
+    else if(live.target)ImGui::TextWrapped("Target: %s %llu | %.1f m | %.1f px",live.identified?"ACQUIRED":"IDENTITY PENDING",
+        static_cast<unsigned long long>(live.target),live.range,live.errorPx);
+    else ImGui::TextWrapped("Target: %s",live.diagnostics.missingReason());
+    const bool cameraFresh=aim_assist::fresh(runtime.cameraAt,qpcUs(),35000);
+    const bool calibrated=config.countsX && config.countsY && config.lensX && config.lensY;
+    const bool lensMatches=calibrated && dayz_camera::validLens(runtime.camera) && std::abs(runtime.camera.px/config.lensX-1)<=.001 && std::abs(runtime.camera.py/config.lensY-1)<=.001;
+    ImGui::TextWrapped("Calibration: %s",runtime.calibration.running()?runtime.calibration.status():!calibrated?"SETUP REQUIRED":!cameraFresh?"WAITING FOR FRESH CAMERA":!lensMatches?"ZOOM CHANGED - return to measured view":"MEASURED");
+    const auto& device=trigger::motionFeedback();
+    ImGui::TextWrapped("Output: %s",!config.enabled?"DISABLED":runtime.calibration.running()?"SETUP - following paused":config.dryRun?"DRY RUN - no tracking movements":
+        !cameraFresh?"WAITING FOR CAMERA DATA":!calibrated?"BLOCKED - setup required":!lensMatches?"PAUSED - return to measured zoom":
+        device.fault||device.paused?device.note:device.restoring?"CHECKING DEVICE - saved calibration":
+        !device.verified?"BLOCKED - device not verified this connection":
+        !config.outputVerified?"BLOCKED - calibration not verified":"ARMED - hold key to follow");
+    ImGui::TextDisabled("Proposal %+d / %+d",live.proposed.x,live.proposed.y);
+    if(live.trackingLeadMs>0)ImGui::TextDisabled("Movement prediction: %.0f ms ahead",live.trackingLeadMs);
+    else ImGui::TextDisabled("Movement prediction: %s",config.motionPrediction?"waiting for stable motion":"off");
+    ImGui::PushTextWrapPos(0.f);ImGui::TextDisabled("%s",runtime.outputStatus);ImGui::PopTextWrapPos();
+    ImGui::EndChild();
+    for(int slot=0;slot<2;++slot)if(config.key && trigger::binding(slot).key==config.key)ImGui::TextWrapped("Also assigned to trigger %s. Its click conditions stay unchanged.",slot?"Secondary":"Primary");
+    if(config.key && config.key==esp.clutch.key)ImGui::TextWrapped("Also assigned to Clutch Mode.");
+    static bool setupOpen=false,advancedOpen=false;
+    if(chip(setupOpen?"Einrichtung schliessen":"Gefuehrt einrichten",setupOpen,ImGui::GetContentRegionAvail().x)) {
+        setupOpen=!setupOpen;if(!setupOpen && runtime.calibration.running())esp.assistSetupCancel=true;
+    }
+    if(setupOpen){
+        ImGui::TextWrapped("Die Einrichtung misst beide Mausachsen automatisch. Am Gaming-PC still stehen, ungefaehr geradeaus schauen und Maus/Tasten loslassen. Kein Klick wird durch die Einrichtung gesendet.");
+        ImGui::TextWrapped("%s",runtime.calibration.status());
+        if(runtime.calibration.running()){
+            ImGui::ProgressBar(float(runtime.calibration.progress())/16.f,ImVec2(-1,0));
+            if(chip("Abbrechen (Esc)",false,ImGui::GetContentRegionAvail().x))esp.assistSetupCancel=true;
+        } else {
+            const bool canStart=cameraFresh && runtime.hotkey.ready && !runtime.hotkey.binding && !clutch::runtime().binding && trigger::motionSetupAvailable();
+            ImGui::BeginDisabled(!canStart);
+            if(chip("Messung starten...",false,ImGui::GetContentRegionAvail().x))ImGui::OpenPopup("Messung bestaetigen");
+            ImGui::EndDisabled();
+            if(!canStart)ImGui::TextWrapped("Start benoetigt laufende Erfassung, frische Kamera, Main-PC-Input und freien MAKCU-Abfragekanal. Keine Tasten binden oder halten.");
+        }
+        if(ImGui::BeginPopupModal("Messung bestaetigen",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
+            ImGui::TextUnformatted("Jetzt werden 16 kleine Mausbewegungen gemessen.\nAm Gaming-PC still stehen und die Maus nicht bewegen.\nEscape oder Abbrechen beendet weitere Messschritte.\nDry Run bleibt danach aktiv.");
+            if(ImGui::Button("Jetzt messen")){config.enabled=true;config.dryRun=true;changed=true;esp.assistSetupStart=true;ImGui::CloseCurrentPopup();}
+            ImGui::SameLine();if(ImGui::Button("Zurueck"))ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+        ImGui::TextDisabled("X %.2f / Y %.2f counts/rad",config.countsX,config.countsY);
+        if(chip("Kalibrierung zuruecksetzen",false,ImGui::GetContentRegionAvail().x))esp.assistSetupReset=true;
+    }
+    if(chip(advancedOpen?"Erweitert schliessen":"Erweiterte Einstellungen",advancedOpen,ImGui::GetContentRegionAvail().x))advancedOpen=!advancedOpen;
+    if(advancedOpen) {
+        slider("##range",config.maxRange,1,1000,"range %.0f m");
+        slider("##speed",config.maxSpeed,1,2000,"speed %.0f counts/s");
+        slider("##accel",config.maxAccel,1,20000,"acceleration %.0f counts/s2");
+        slider("##deadzone",config.deadzonePx,0,20,"deadzone %.2f px");
+        ImGui::TextDisabled("Lens %.5f / %.5f",config.lensX,config.lensY);
+        ImGui::PushTextWrapPos(0.f);
+        ImGui::TextDisabled("Calibration is measured, not guessed. Zoom changes pause movement. A reconnect requires guided device verification. Physical mouse input is never locked.");
+        ImGui::TextDisabled("Only onscreen/freshness and existing friend checks are available; onscreen does not prove line of sight.");
+        ImGui::PopTextWrapPos();
+        ImGui::TextWrapped("Human players in snapshot: %u",live.diagnostics.players);
+        for(unsigned i=0;i<unsigned(aim_assist::Rejection::Count);++i)if(live.diagnostics.counts[i])
+            ImGui::TextWrapped("%s: %u",aim_assist::reasonText(aim_assist::Rejection(i)),live.diagnostics.counts[i]);
+        ImGui::TextWrapped("Device: %s",device.note);
+    }
+    ImGui::PopID();
+}
+
 void drawTriggerBindings(bool& ch, const char* scope) {
     ImGui::PushID(scope);
     for (int slot = 0; slot < 2; ++slot) {
@@ -1725,6 +1835,7 @@ void drawSettingsBody(Config& cfg, const Counts& n, bool live, const std::vector
     }
 
     drawTriggerSection(ch);
+    drawAimAssist(cfg.esp,ch);
 
     section("LOOT");
     ch |= switchRow("High Valuables >50k", &cfg.highValues);

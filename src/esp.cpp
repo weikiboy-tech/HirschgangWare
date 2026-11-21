@@ -125,6 +125,7 @@ struct Box {
 std::unique_ptr<Process> gProc;
 EspSettings gSettings;
 std::atomic<bool> gClutchBones{false};
+std::atomic<int> gAssistBoneRange{0};
 bool gDma = false;
 bool gFull = false;
 bool gForceGdi = false;
@@ -1226,9 +1227,10 @@ void scanDayz(DzSnap& out, const char*& stage) {
     }
 
     const int triggerBoneRange = gDzTriggerBoneRange.load(std::memory_order_relaxed);
+    const int assistBoneRange = gAssistBoneRange.load(std::memory_order_relaxed);
     const bool overlayBones = gSettings.skeleton || gClutchBones.load(std::memory_order_relaxed);
-    const bool wantBones = overlayBones || triggerBoneRange > 0;
-    const float boneRange = float(overlayBones ? gSettings.dzRange : std::min(gSettings.dzRange, triggerBoneRange));
+    const bool wantBones = overlayBones || triggerBoneRange > 0 || assistBoneRange > 0;
+    const float boneRange = float(overlayBones ? gSettings.dzRange : std::min(gSettings.dzRange, std::max(triggerBoneRange,assistBoneRange)));
     struct BoneRead {
         size_t ti, req;
         uint64_t arr, arrNow = 0;
@@ -2758,6 +2760,131 @@ void publishWebmap(const DzSnap& snap, const Vec3* heading) {
     webmap::publish(id, std::move(frame));
 }
 
+void saveSettingsSoon();
+void updateAimAssist(const DzSnap& snap,const DzCamShare& camera) {
+    auto& runtime=aim_assist::runtime();
+    runtime.camera=camera.c;runtime.cameraAt=camera.tUs;
+    const auto config=aim_assist::validated(gSettings.assist);
+    aim_assist::Frame frame;
+    frame.now=qpcUs();frame.session=snap.world;frame.cameraAt=camera.tUs;frame.camera=camera.c;
+    frame.width=gView.right-gView.left;frame.height=gView.bottom-gView.top;
+    frame.held=runtime.hotkey.active;frame.inputReady=runtime.hotkey.ready;
+    frame.capturing=runtime.hotkey.binding || trigger::capturing() || trigger::probing() || clutch::runtime().binding;
+    frame.deviceReady=trigger::motionDeviceReady() && trigger::motionFeedback().verified && !trigger::motionFeedback().fault;
+    frame.directOnly=true; // No live ballistic feed; legacy preference never blocks direct mode.
+    // No verified muzzle/ballistic model exists in the current reader. Leave
+    // frame.physics invalid; prediction explicitly blocks rather than guessing.
+    static std::vector<aim_assist::Candidate> candidates;
+    runtime.diagnostics=aim_assist::prepare(snap.ents,frame,config,runtime.engine.live().target,
+        [](const std::string& name){return friends::contains(name);},candidates);
+    frame.candidates=&candidates;
+    frame.diagnostics=&runtime.diagnostics;
+    const auto& feedback=trigger::motionFeedback();
+    if(runtime.outputCycle.pending()){
+        if(runtime.outputCycle.update(frame.camera,frame.cameraAt,frame.now,frame.session)){
+            trigger::completeMotionInterval(frame.now);
+        }
+        else if(runtime.outputCycle.failed()){
+            trigger::pauseMotionOutput(runtime.outputCycle.reason());
+            logLine("[assist-output] %s; deviceVerified=%d fault=%d",runtime.outputCycle.reason(),int(feedback.verified),int(feedback.fault));
+        }
+    }
+    const auto remote=trigger::remoteSample();
+    const bool boundKeyDown=config.key && dma_keyboard::down(remote.bits,unsigned(config.key));
+    const bool savedCalibration=config.enabled && config.outputVerified && config.countsX && config.countsY &&
+        config.lensX && config.lensY && std::abs(frame.camera.px/config.lensX-1)<=.001 &&
+        std::abs(frame.camera.py/config.lensY-1)<=.001;
+    if(savedCalibration && frame.inputReady && !frame.held && !boundKeyDown && !frame.capturing &&
+       !runtime.calibrationStart && !runtime.calibration.running() && trigger::beginMotionRestore()){
+        logLine("[assist-output] Checking device connection for saved calibration");
+    }
+    if(aim_assist::mayRearm(config,frame,feedback,boundKeyDown)){
+        if(runtime.outputCycle.releasedSourceReady(frame.camera,frame.cameraAt,frame.now,frame.session) && trigger::resumeMotionOutput()){
+            runtime.outputCycle.reset();runtime.engine.reset();
+            logLine("[assist-output] Hold key released; checking channel, calibration retained");
+        }
+    } else if(feedback.paused)runtime.outputCycle.resetReleaseObservation();
+    aim_assist::Calibration::Input measurement;
+    measurement.now=frame.now;measurement.session=frame.session;measurement.cameraAt=frame.cameraAt;measurement.camera=frame.camera;
+    measurement.device=trigger::motionSetupAvailable();measurement.idle=feedback.idleFresh(frame.now);
+    measurement.idleAt=feedback.at;measurement.fault=feedback.fault;measurement.generation=feedback.generation;
+    measurement.cameraOnly=feedback.cameraOnly;
+    bool heldRemote=false;
+    for(unsigned key=1;key<255;++key)heldRemote|=dma_keyboard::down(remote.bits,key);
+    measurement.interrupted=!config.enabled || !frame.inputReady || frame.capturing || heldRemote ||
+        trigger::motionPhysicalBusy() || trigger::live().keyHeld || (GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0;
+    if(runtime.calibrationStart){
+        runtime.calibrationStart=false;runtime.calibrationApplied=false;
+        const bool opened=trigger::beginMotionSetup();
+        runtime.outputCycle.reset();
+        measurement.device=opened;measurement.generation=trigger::motionFeedback().generation;
+        measurement.idle=false;measurement.fault=false;
+        measurement.cameraOnly=false;
+        runtime.calibration.start(measurement);
+        if(!runtime.calibration.running())trigger::endMotionSetup(false);
+    }
+    const bool measuring=runtime.calibration.running();
+    if(measuring){
+        const auto previousStep=runtime.calibration.progress();
+        const auto command=runtime.calibration.tick(measurement);
+        if(feedback.cameraOnly && runtime.calibration.progress()>previousStep)trigger::completeMotionInterval(frame.now,true);
+        if(command.x||command.y)runtime.calibration.submitted(trigger::calibrationMove(command.x,command.y,frame.now+5000),measurement);
+        if(!runtime.calibration.running()){
+            if(runtime.calibration.complete()){
+                const auto& result=runtime.calibration.result();
+                gSettings.assist.countsX=result.countsX;gSettings.assist.countsY=result.countsY;
+                gSettings.assist.lensX=result.lensX;gSettings.assist.lensY=result.lensY;
+                gSettings.assist.responseMs=double(result.responseUs)/1000.;
+                gSettings.assist.outputVerified=true;gSettings.assist.dryRun=true;
+                runtime.calibrationApplied=true;saveSettingsSoon();
+            }
+            logLine("[assist-setup] %s; steps=%u device=%s legacyCamera=%d responseMs=%.1f",
+                runtime.calibration.status(),runtime.calibration.progress(),feedback.note,int(feedback.cameraOnly),
+                double(runtime.calibration.observedResponseUs())/1000.);
+            trigger::endMotionSetup(runtime.calibration.complete());
+        }
+    }
+    if(measuring)frame.capturing=true;
+    frame.deviceReady=trigger::motionDeviceReady() && feedback.verified && !feedback.fault;
+    frame.outputBusy=!config.dryRun && (!feedback.idleFresh(frame.now) || !trigger::motionSetupAvailable());
+    // Readiness is a state, not a one-frame event: an existing click may defer
+    // the next move after the paced interval has already finished.
+    frame.outputCycleComplete=feedback.idleFresh(frame.now) && (!feedback.cameraOnly||!runtime.outputCycle.pending());
+    frame.outputPaused=feedback.paused;
+    frame.outputIssue=(feedback.fault||feedback.paused)?feedback.note:feedback.restoring?"CHECKING DEVICE - saved calibration":
+        !feedback.verified?"OUTPUT BLOCKED - device not verified":
+        !config.outputVerified?"OUTPUT BLOCKED - calibration not verified":nullptr;
+    frame.commandLimit=feedback.cameraOnly?16:127;
+    const auto live=runtime.engine.update(config,frame);
+    static uint64_t lastDiagnostic=0;
+    if(config.enabled && frame.held && frame.now-lastDiagnostic>=1000000) {
+        lastDiagnostic=frame.now;
+        const auto& d=live.diagnostics;
+        logLine("[assist] %s; target=%llu error=%.1fpx range=%.1fm lead=%.1fms players=%u ready=%u identityPending=%u friends=%u noBones=%u staleRoot=%u staleBones=%u offscreen=%u rangeRejected=%u circleRejected=%u calibration=%d dryRun=%d verified=%d paused=%d fault=%d",
+            live.status,static_cast<unsigned long long>(live.target),live.errorPx,live.range,live.trackingLeadMs,d.players,
+            d.get(aim_assist::Rejection::Ready),d.get(aim_assist::Rejection::IdentityPending),d.get(aim_assist::Rejection::Friend),
+            d.get(aim_assist::Rejection::NoBones),d.get(aim_assist::Rejection::StaleRoot),d.get(aim_assist::Rejection::StaleBones),
+            d.get(aim_assist::Rejection::Offscreen),d.get(aim_assist::Rejection::Range),d.get(aim_assist::Rejection::Area),
+            int(config.countsX!=0 && config.countsY!=0),int(config.dryRun),int(feedback.verified),int(feedback.paused),int(feedback.fault));
+    }
+    if(live.active && (live.proposed.x || live.proposed.y)) {
+        if(config.dryRun)runtime.outputStatus="DRY RUN - no device command";
+        else {
+            const bool sent=trigger::moveRelative(live.proposed.x,live.proposed.y,frame.now+5000,config.outputVerified);
+            runtime.outputStatus=sent?"relative movement submitted":"movement dropped (click priority, feedback, capture, expiry or device)";
+            if(sent && trigger::cfg().showDebug){
+                logLine("[assist-move] t=%llu counts=%+d,%+d error=%.1fpx lead=%.1fms smoothing=%.0fms",
+                    static_cast<unsigned long long>(frame.now),live.proposed.x,live.proposed.y,
+                    live.errorPx,live.trackingLeadMs,config.smoothMs);
+            }
+            if(sent && feedback.cameraOnly)runtime.outputCycle.start(frame.camera,frame.now,frame.session,
+                live.proposed.x,live.proposed.y,config.countsX,config.countsY,config.responseMs);
+        }
+    } else runtime.outputStatus="no movement pending";
+    if(feedback.paused||feedback.fault)runtime.outputStatus=feedback.note;
+    if(runtime.calibration.running() || feedback.restoring || (live.active&&!config.dryRun))trigger::serviceMotion();
+}
+
 bool drawDayzFrame() {
     const auto& trig = trigger::cfg();
     gDzTriggerBoneRange.store(trig.enabled || trig.moduleOpen || trig.showRegions ? (trig.maxDistM > 0 ? trig.maxDistM : gSettings.dzRange) : 0,
@@ -2882,6 +3009,27 @@ bool drawDayzFrame() {
         if (trigger::cfg().showDebug && trigger::live().lastRx != lastRxSeen2) {
             lastRxSeen2 = trigger::live().lastRx;
             if (!lastRxSeen2.empty()) logLine("[trg] rx: %s", lastRxSeen2.c_str());
+        }
+    }
+    // Input/control use their own freshness gate, independently of whether the
+    // stricter display projection accepted this render frame. No new DMA read.
+    DzCamShare controlCamera;
+    {
+        std::lock_guard<std::mutex> lock(gDzCamMx);
+        controlCamera = gDzCamShare;
+    }
+    const uint64_t controlNow = qpcUs();
+    const bool controlWorld = snap.world && controlCamera.world == snap.world;
+    if(haveViewport && controlWorld && dayz_camera::validLens(controlCamera.c) &&
+       dayz_camera::fresh(controlCamera.tUs,controlNow,35000))updateAimAssist(snap,controlCamera);
+    else {
+        aim_assist::runtime().engine.suspend("CAMERA INVALID/STALE");
+        aim_assist::runtime().outputStatus="no movement pending";aim_assist::runtime().cameraAt=0;
+        if((aim_assist::runtime().calibration.running() || aim_assist::runtime().calibrationStart) &&
+           aim_assist::calibrationSourceLost(controlNow,controlCamera.tUs,controlWorld && haveViewport)){
+            logLine("[assist-setup] Cancelled: sustained camera/world loss (sameWorld=%d ageMs=%.1f)",int(controlWorld),
+                controlCamera.tUs && controlNow>=controlCamera.tUs?double(controlNow-controlCamera.tUs)/1000.:-1.);
+            aim_assist::runtime().calibration.cancel();aim_assist::runtime().calibrationStart=false;trigger::endMotionSetup(false);
         }
     }
     static ULONGLONG lastFps = GetTickCount64();
@@ -3316,6 +3464,11 @@ void drawScene(Canvas& cv) {
         drawCrosshair();
         return;
     }
+    if(gDma && gSettings.assist.enabled && gSettings.assist.showArea){
+        cv.pen(RGB(65,170,155),1);
+        cv.ellipseF(crosshair::center(gView.left,gView.right),crosshair::center(gView.top,gView.bottom),
+            float(gSettings.assist.radiusPx),float(gSettings.assist.radiusPx));
+    }
     if (trigger::cfg().showRegions) {
         const float cx = crosshair::center(gView.left, gView.right), cy = crosshair::center(gView.top, gView.bottom);
         const auto match = trigger::targetAt(trigger::cfg(), gDzTriggerRegions, cx, cy);
@@ -3418,6 +3571,13 @@ PanelInfo espInfo() {
 void destroyRadarScreen();
 
 void stopEsp() {
+    aim_assist::runtime().outputCycle.reset();
+    aim_assist::runtime().calibration.cancel();aim_assist::runtime().calibrationStart=false;trigger::endMotionSetup(false);
+    aim_assist::runtime().hotkey.cancelBinding();
+    aim_assist::runtime().engine.suspend("STOPPED");
+    aim_assist::runtime().outputStatus="no movement pending";
+    aim_assist::runtime().cameraAt=0;
+    gAssistBoneRange.store(0,std::memory_order_relaxed);
     clutch::runtime().cancelBinding();
     gClutchBones.store(false, std::memory_order_relaxed);
     trigger::setRemoteInputNeeded(false);
@@ -3671,6 +3831,7 @@ void syncRadarScreen() {
     cfg.headingLen = gSettings.dzRadarHeadingLen;
     cfg.esp.skeleton = gSettings.skeleton;
     cfg.esp.clutch = gSettings.clutch;
+    cfg.esp.assist = gSettings.assist;
     cfg.esp.clutchActive = clutch::runtime().active;
     cfg.esp.clutchReady = clutch::runtime().ready;
     cfg.esp.clutchBinding = clutch::runtime().binding;
@@ -3747,6 +3908,8 @@ void syncRadarScreen() {
     }
     if (cfg.changed) {
         gSettings.clutch = clutch::validated(cfg.esp.clutch);
+        gSettings.assist = aim_assist::validated(cfg.esp.assist);
+        aim_assist::runtime().hotkey.configure({gSettings.assist.enabled,gSettings.assist.key,clutch::Activation::Hold,false});
         clutch::runtime().configure(gSettings.clutch);
         gSettings.dzLoot = cfg.loot;
         gSettings.dzLootCats = cfg.lootMask;
@@ -3803,9 +3966,30 @@ void syncRadarScreen() {
     }
     if (cfg.esp.clutchCancel) clutch::runtime().cancelBinding();
     if (cfg.esp.clutchBind) {
+        aim_assist::runtime().hotkey.cancelBinding();
+        aim_assist::runtime().engine.reset();
         trigger::stopCapture();
         clutch::runtime().beginBinding();
     }
+    if(cfg.esp.assistCancel) {
+        aim_assist::runtime().hotkey.cancelBinding();
+        aim_assist::runtime().engine.reset();
+    }
+    if(cfg.esp.assistBind) {
+        if(trigger::capturing())trigger::stopCapture();
+        if(clutch::runtime().binding)clutch::runtime().cancelBinding();
+        aim_assist::runtime().hotkey.beginBinding();
+        aim_assist::runtime().engine.reset();
+    }
+    if(cfg.esp.assistSetupCancel || cfg.esp.assistSetupReset){
+        aim_assist::runtime().calibration.cancel();aim_assist::runtime().calibrationStart=false;
+        trigger::endMotionSetup(false);aim_assist::runtime().engine.reset();
+    }
+    if(cfg.esp.assistSetupReset){
+        auto& assist=gSettings.assist;assist.countsX=assist.countsY=assist.lensX=assist.lensY=0;
+        assist.outputVerified=false;assist.dryRun=true;aim_assist::runtime().calibration.reset();saveSettingsSoon();
+    }
+    if(cfg.esp.assistSetupStart && !cfg.esp.assistSetupReset)aim_assist::runtime().calibrationStart=true;
     if (wantShow && !want) {
         gSettings.dzRadarScreen = false;
         saveSettings(gSettings);
@@ -4284,10 +4468,21 @@ int main(int argc, char** argv) {
             auto& clutchState = clutch::runtime();
             clutchState.configure(gSettings.clutch);
             gClutchBones.store(gSettings.clutch.enabled && clutch::bindable(gSettings.clutch.key), std::memory_order_relaxed);
-            trigger::setRemoteInputNeeded(gDma && (gSettings.clutch.enabled || clutchState.binding));
+            auto& assistState=aim_assist::runtime();
+            assistState.hotkey.configure({gSettings.assist.enabled,gSettings.assist.key,clutch::Activation::Hold,false});
+            gAssistBoneRange.store(gSettings.assist.enabled && clutch::bindable(gSettings.assist.key) ? int(gSettings.assist.maxRange) : 0,std::memory_order_relaxed);
+            trigger::setRemoteInputNeeded(gDma && (gSettings.clutch.enabled || clutchState.binding || gSettings.assist.enabled || assistState.hotkey.binding));
             trigger::pollInputs();
             clutchState.update(gDma ? trigger::remoteSample() : dma_keyboard::Sample{}, gDma,
                                trigger::capturing(), (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0);
+            assistState.hotkey.update(gDma ? trigger::remoteSample() : dma_keyboard::Sample{},gDma,
+                                     trigger::capturing() || clutchState.binding,(GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0);
+            if(assistState.hotkey.boundKey) {
+                gSettings.assist.key=assistState.hotkey.boundKey;
+                assistState.hotkey.boundKey=0;
+                assistState.hotkey.configure({gSettings.assist.enabled,gSettings.assist.key,clutch::Activation::Hold,false});
+                saveSettingsSoon();
+            }
             if (clutchState.boundKey) {
                 gSettings.clutch.key = clutchState.boundKey;
                 clutchState.boundKey = 0;

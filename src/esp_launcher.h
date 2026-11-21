@@ -10,6 +10,7 @@
 
 #include "crosshair.h"
 #include "clutch.h"
+#include "aim_assist.h"
 #include "loot.h"
 #include "webmap.h"
 
@@ -23,6 +24,7 @@ struct EspSettings {
 
     bool skeleton = true, box = false, names = true, info = true, fps = true;
     clutch::Config clutch;
+    aim_assist::Config assist;
     int predictMs = 12;
     bool uncapped = true;
     int dzRange = 1000;

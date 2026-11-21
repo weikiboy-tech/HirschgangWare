@@ -82,6 +82,9 @@
     <ClInclude Include="src\trigger_geometry.h" />
     <ClInclude Include="src\crosshair.h" />
     <ClInclude Include="src\clutch.h" />
+    <ClInclude Include="src\aim_assist.h" />
+    <ClInclude Include="src\aim_calibration.h" />
+    <ClInclude Include="src\aim_motion_protocol.h" />
     <ClInclude Include="src\player_roster.h" />
     <ClInclude Include="src\dayz_camera.h" />
     <ClInclude Include="src\webmap.h" />
