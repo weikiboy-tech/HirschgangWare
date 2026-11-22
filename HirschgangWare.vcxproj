@@ -41,6 +41,7 @@
     <ClCompile Include="src\esp.cpp" />
     <ClCompile Include="src\gpu_canvas.cpp" />
     <ClCompile Include="src\radar.cpp" />
+    <ClCompile Include="src\lan_keyboard.cpp" />
     <ClCompile Include="src\webmap.cpp" />
     <ClCompile Include="src\mapdl.cpp" />
     <ClCompile Include="src\loot.cpp" />
@@ -71,6 +72,9 @@
     <ClInclude Include="src\mapdl.h" />
     <ClInclude Include="src\process.h" />
     <ClInclude Include="src\keyboard_bitmap.h" />
+    <ClInclude Include="src\lan_keyboard.h" />
+    <ClInclude Include="src\lan_keyboard_wire.h" />
+    <ClInclude Include="src\lan_key_outbox.h" />
     <ClInclude Include="src\keyboard_resolver.h" />
     <ClInclude Include="src\radar.h" />
     <ClInclude Include="src\radar_events.h" />
@@ -81,6 +85,7 @@
     <ClInclude Include="src\high_value.h" />
     <ClInclude Include="src\trigger_geometry.h" />
     <ClInclude Include="src\crosshair.h" />
+    <ClInclude Include="src\overlay_viewport.h" />
     <ClInclude Include="src\clutch.h" />
     <ClInclude Include="src\aim_assist.h" />
     <ClInclude Include="src\aim_calibration.h" />

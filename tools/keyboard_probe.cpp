@@ -9,10 +9,13 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <iostream>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <vector>
 
 namespace {
@@ -27,24 +30,32 @@ struct Vmm : Reader {
     template<class Fn>
     Fn load(const char* name) const {
         const auto fn = reinterpret_cast<Fn>(GetProcAddress(dll, name));
-        if (!fn) throw std::runtime_error(name);
+        if (!fn) throw std::runtime_error(std::string("Missing VMM export: ") + name);
         return fn;
     }
 
-    void open(const wchar_t* path) {
+    void open(const wchar_t* path, bool printTransportErrors = false) {
         dll = LoadLibraryExW(path, nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
         if (!dll) throw std::runtime_error("Could not load vmm.dll. Pass its absolute path.");
         close = load<decltype(close)>("VMMDLL_Close");
+        const auto initialize = load<decltype(&VMMDLL_Initialize)>("VMMDLL_Initialize");
+        LPCSTR args[]{"", "-device", "fpga", "-waitinitialize", "-printf"};
+        handle = initialize(DWORD(std::size(args) - (printTransportErrors ? 0 : 1)), args);
+        if (!handle) throw std::runtime_error(printTransportErrors
+            ? "VMM FPGA initialization failed. See the MemProcFS/LeechCore output."
+            : "VMM FPGA initialization failed. Run --transport-only for diagnostics.");
+    }
+
+    void loadVersionApi() {
+        registry = load<decltype(registry)>("VMMDLL_WinReg_QueryValueExU");
+    }
+
+    void loadLayoutApi() {
         read = load<decltype(read)>("VMMDLL_MemReadEx");
         module = load<decltype(module)>("VMMDLL_ProcessGetModuleBaseU");
         processes = load<decltype(processes)>("VMMDLL_ProcessGetInformationAll");
         free = load<decltype(free)>("VMMDLL_MemFree");
         exportAddress = load<decltype(exportAddress)>("VMMDLL_ProcessGetProcAddressU");
-        registry = load<decltype(registry)>("VMMDLL_WinReg_QueryValueExU");
-        const auto initialize = load<decltype(&VMMDLL_Initialize)>("VMMDLL_Initialize");
-        LPCSTR args[]{"", "-device", "fpga", "-waitinitialize"};
-        handle = initialize(DWORD(std::size(args)), args);
-        if (!handle) throw std::runtime_error("FPGA initialization failed. Close other DMA clients and check the link.");
     }
 
     ~Vmm() {
@@ -53,6 +64,47 @@ struct Vmm : Reader {
     }
 
 };
+
+int checkTransport(const wchar_t* vmmPath) {
+    const auto driverPath = std::filesystem::path(vmmPath).parent_path() / L"FTD3XX.dll";
+    const std::unique_ptr<std::remove_pointer_t<HMODULE>, decltype(&FreeLibrary)> driver(
+        LoadLibraryExW(driverPath.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH), FreeLibrary);
+    if (!driver) throw std::runtime_error("Could not load FTD3XX.dll beside vmm.dll (Win32 " +
+                                          std::to_string(GetLastError()) + ").");
+
+    // FTDI AN_379 defines the API and FT_FLAGS_OPENED for D3XX USB bridges.
+    using ListDevices = ULONG (WINAPI*)(LPDWORD);
+    using DeviceDetails = ULONG (WINAPI*)(DWORD, LPDWORD, LPDWORD, LPDWORD, LPDWORD, PVOID, PVOID, PHANDLE);
+    const auto list = reinterpret_cast<ListDevices>(GetProcAddress(driver.get(), "FT_CreateDeviceInfoList"));
+    const auto details = reinterpret_cast<DeviceDetails>(GetProcAddress(driver.get(), "FT_GetDeviceInfoDetail"));
+    if (!list || !details) throw std::runtime_error("Required FTDI D3XX enumeration API unavailable.");
+
+    DWORD count = 0;
+    const ULONG listStatus = list(&count);
+    if (listStatus != 0) throw std::runtime_error("FT_CreateDeviceInfoList failed (D3XX status " +
+                                                 std::to_string(listStatus) + ").");
+    std::printf("FTDI D3XX devices: %lu\n", count);
+    if (!count) throw std::runtime_error("No D3XX bridge detected.");
+
+    constexpr DWORD openedFlag = 1;
+    DWORD flags = 0, type = 0, id = 0, location = 0;
+    char serial[16]{}, description[32]{};
+    HANDLE openedHandle = nullptr;
+    const ULONG detailStatus = details(0, &flags, &type, &id, &location, serial, description, &openedHandle);
+    if (detailStatus != 0) throw std::runtime_error("FT_GetDeviceInfoDetail failed (D3XX status " +
+                                                   std::to_string(detailStatus) + ").");
+    if (flags & openedFlag) {
+        std::puts("D3XX reports device 0 as open. VMM initialization skipped.");
+        std::puts("If capture is stopped, retry from the same Windows context as the launcher.");
+        return 5;
+    }
+
+    std::printf("D3XX device 0 type %lu is available. Opening the VMM FPGA session.\n", type);
+    Vmm vmm;
+    vmm.open(vmmPath, true);
+    std::puts("VMM FPGA session initialized. Windows keyboard compatibility was not checked.");
+    return 0;
+}
 
 bool phase(const Vmm& vmm, DWORD pid, uint64_t address, const char* prompt, unsigned expected, bool localControl = false) {
     std::printf("\n%s\nPress Enter on the second PC, wait for GO, then follow the instruction for 8 seconds.\n", prompt);
@@ -98,16 +150,32 @@ bool phase(const Vmm& vmm, DWORD pid, uint64_t address, const char* prompt, unsi
 }  // namespace
 
 int wmain(int argc, wchar_t** argv) try {
+    const bool transportOnly = argc == 3 && wcscmp(argv[2], L"--transport-only") == 0;
+    const bool compatibilityOnly = argc == 3 && wcscmp(argv[2], L"--compatibility-only") == 0;
     if (argc < 2 || argc > 4 || (argc == 4 && wcscmp(argv[3], L"--verify") != 0)) {
+        std::puts("Usage: keyboard_probe.exe <absolute path to vmm.dll> --transport-only");
+        std::puts("Usage: keyboard_probe.exe <absolute path to vmm.dll> --compatibility-only");
         std::puts("Usage: keyboard_probe.exe <absolute path to vmm.dll> [target session, default 1] [--verify]");
         return 1;
     }
-    const DWORD session = argc >= 3 ? std::stoul(argv[2]) : 1;
+    if (transportOnly) return checkTransport(argv[1]);
     Vmm vmm;
     vmm.open(argv[1]);
+    vmm.loadVersionApi();
     const auto [build, revision] = vmm.version();
     std::printf("Target Windows: %lu.%lu\n", build, revision);
-    const auto candidate = resolve(vmm, session, true, build == 26200 && revision == 9711);
+    if (!verifiedVersion(build, revision)) {
+        std::printf("Build check: unverified Windows build. Verified build: %lu.%lu. "
+                    "Keyboard layout lookup and sampling skipped.\n", kVerifiedBuild, kVerifiedRevision);
+        return 4;
+    }
+    if (compatibilityOnly) {
+        std::puts("Build check: matches the verified version. Keyboard layout and sampling were not tested.");
+        return 0;
+    }
+    const DWORD session = argc >= 3 ? std::stoul(argv[2]) : 1;
+    vmm.loadLayoutApi();
+    const auto candidate = resolve(vmm, session, true, true);
     const auto [reader, address] = candidate;
     const uint64_t oldExport = vmm.exportAddress(vmm.handle, reader, "win32kbase.sys", "gafAsyncKeyState");
     std::printf("Legacy export: 0x%llx\n", oldExport);

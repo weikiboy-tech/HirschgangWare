@@ -17,31 +17,141 @@ inline Vec3 sub(Vec3 a,Vec3 b){return {a.x-b.x,a.y-b.y,a.z-b.z};}
 inline Vec3 mul(Vec3 a,double s){return {float(a.x*s),float(a.y*s),float(a.z*s)};}
 inline double norm(Vec3 a){return std::sqrt(double(a.x)*a.x+double(a.y)*a.y+double(a.z)*a.z);}
 inline bool fresh(uint64_t at,uint64_t now,uint64_t limit){return at && now>=at && now-at<limit;}
-struct Config {
-    bool enabled=false,prediction=false,dryRun=true,outputVerified=false,showArea=false;
-    int key=0,point=2; // Existing joint indexes: 0 head, 2 chest/spine.
+struct ViewCalibration {
+    double countsX=0, countsY=0, lensX=0, lensY=0, responseMs=16;
+    int commandLimit=kLegacyCommandLimit;
+};
+inline constexpr int kViewCount=33; // Hipfire plus independently measured views.
+inline std::string viewLabel(int slot){
+    if(slot==0)return "Hipfire";
+    return "Zoom profile "+std::to_string(slot);
+}
+inline constexpr double kScopedSearchRadiusPx=1000.;
+struct Tuning {
+    Tuning()=default;
+    explicit Tuning(double radius) : radiusPx(radius) {}
+    int point=2; // 0 head, 2 chest/spine, 3 center mass.
     double smoothMs=120,strength=.35,radiusPx=120,maxRange=300;
     double maxSpeed=700,maxAccel=3500,deadzonePx=1;
-    double countsX=0,countsY=0,lensX=0,lensY=0;
-    double responseMs=16;
     bool motionPrediction=true;
     double predictionAmount=100;
 };
-inline Config validated(Config c){
-    if(!clutch::bindable(c.key))c.key=0;
-    if(c.point!=0)c.point=2;
+struct Config : Tuning {
+    bool enabled=false,prediction=false,dryRun=true,outputVerified=false,showArea=false;
+    int key=0;
+    double countsX=0,countsY=0,lensX=0,lensY=0;
+    double responseMs=16;
+    int cameraCommandLimit=kLegacyCommandLimit;
+    Tuning scoped{kScopedSearchRadiusPx};
+    std::array<ViewCalibration,kViewCount-1> extraViews{};
+    int viewMode=0; // Effective view for the controller: matched slot + 1.
+    bool setupScoped=false; // Mode requested by the current guided setup action.
+};
+inline bool usableView(const ViewCalibration& view){
+    const auto counts=[](double v){return std::isfinite(v) && std::abs(v)>=1 && std::abs(v)<=1e7;};
+    return counts(view.countsX) && counts(view.countsY) && view.lensX>0 && view.lensX<=10 &&
+        view.lensY>0 && view.lensY<=10 && view.responseMs>=16 && view.responseMs<=kMaxScopedResponseMs &&
+        (view.commandLimit==kLegacyCommandLimit || view.commandLimit==kScopedCommandLimit);
+}
+inline ViewCalibration calibrationFor(const Config& config,int slot){
+    if(slot==0 && config.outputVerified)
+        return {config.countsX,config.countsY,config.lensX,config.lensY,config.responseMs};
+    if(slot>=1 && slot<kViewCount)return config.extraViews[size_t(slot-1)];
+    return {};
+}
+inline void saveView(Config& config,int slot,const ViewCalibration& v){
+    if(slot==0){
+        config.countsX=v.countsX;config.countsY=v.countsY;
+        config.lensX=v.lensX;config.lensY=v.lensY;config.responseMs=v.responseMs;
+        config.outputVerified=usableView(v);
+    }else if(slot>=1 && slot<kViewCount){
+        config.extraViews[size_t(slot-1)]=v;
+    }
+}
+inline bool matchesView(const ViewCalibration& v,const dayz_camera::Cam& c){
+    return usableView(v) && dayz_camera::validLens(c) &&
+        std::abs(c.px/v.lensX-1)<=.001 && std::abs(c.py/v.lensY-1)<=.001;
+}
+inline int activeView(const Config& config,const dayz_camera::Cam& camera){
+    int match=-1;
+    for(int slot=0;slot<kViewCount;++slot){
+        if(!matchesView(calibrationFor(config,slot),camera))continue;
+        if(match>=0)return -2; // Same FOV can have different sensitivity.
+        match=slot;
+    }
+    return match;
+}
+inline bool resumeMeasuredView(const Config& config,const dayz_camera::Cam& camera,int measuredSlot,bool requested){
+    return requested && measuredSlot>=0 && activeView(config,camera)==measuredSlot;
+}
+inline bool scopedView(const Config& config,const dayz_camera::Cam& camera,int view){
+    if(view==0 || !dayz_camera::validLens(camera))return false;
+    const auto hip=calibrationFor(config,0);
+    // A measured zoom profile takes precedence. For unmeasured magnification
+    // require a substantial change on both axes: normal camera transitions can
+    // change the world-camera FOV too.
+    return view>0 || (usableView(hip) && camera.px<hip.lensX*.8 && camera.py<hip.lensY*.8);
+}
+inline double searchRadius(const Config& config,const dayz_camera::Cam& camera,int view){
+    return scopedView(config,camera,view)?config.scoped.radiusPx:config.radiusPx;
+}
+inline int measurementSlot(const Config& config,const dayz_camera::Cam& camera,bool scoped){
+    const int view=activeView(config,camera);
+    if(!scoped)return scopedView(config,camera,view)?-1:0;
+    if(!dayz_camera::validLens(camera) || matchesView(calibrationFor(config,0),camera))return -1;
+    int spare=-1,match=-1;
+    for(int slot=1;slot<kViewCount;++slot){
+        const auto v=calibrationFor(config,slot);
+        if(!usableView(v) && spare<0)spare=slot;
+        if(matchesView(v,camera)){
+            if(match>=0)return -2; // Never replace an ambiguous measurement.
+            match=slot;
+        }
+    }
+    return match>=0?match:spare;
+}
+inline Config forView(Config config,int slot,bool scoped=false){
+    if(slot==0)return config;
+    if(slot>0 || scoped)static_cast<Tuning&>(config)=config.scoped;
+    const auto calibration=calibrationFor(config,slot);
+    saveView(config,0,calibration);
+    config.cameraCommandLimit=calibration.commandLimit;
+    config.viewMode=slot+1;
+    return config;
+}
+inline void validateTuning(Tuning& tuning,double radiusLimit){
+    if(tuning.point!=0 && tuning.point!=3)tuning.point=2;
     const auto clean=[](double n,double lo,double hi,double fallback){return std::isfinite(n)?std::clamp(n,lo,hi):fallback;};
-    c.smoothMs=clean(c.smoothMs,10,1000,120);c.strength=clean(c.strength,0,1,.35);
-    c.radiusPx=clean(c.radiusPx,10,600,120);c.maxRange=clean(c.maxRange,1,1000,300);
-    c.maxSpeed=clean(c.maxSpeed,1,2000,700);c.maxAccel=clean(c.maxAccel,1,20000,3500);
-    c.deadzonePx=clean(c.deadzonePx,0,20,1);
-    c.responseMs=clean(c.responseMs,16,100,16);
-    c.predictionAmount=clean(c.predictionAmount,25,150,100);
+    tuning.smoothMs=clean(tuning.smoothMs,10,1000,120);
+    tuning.strength=clean(tuning.strength,0,1,.35);
+    tuning.radiusPx=clean(tuning.radiusPx,10,radiusLimit,radiusLimit==kScopedSearchRadiusPx?kScopedSearchRadiusPx:120);
+    tuning.maxRange=clean(tuning.maxRange,1,1000,300);
+    tuning.maxSpeed=clean(tuning.maxSpeed,1,2000,700);
+    tuning.maxAccel=clean(tuning.maxAccel,1,20000,3500);
+    tuning.deadzonePx=clean(tuning.deadzonePx,0,20,1);
+    tuning.predictionAmount=clean(tuning.predictionAmount,25,150,100);
+}
+inline Config validated(Config c,double radiusLimit=600.){
+    if(!clutch::bindable(c.key))c.key=0;
+    validateTuning(c,radiusLimit);
+    validateTuning(c.scoped,kScopedSearchRadiusPx);
+    c.responseMs=std::isfinite(c.responseMs)?std::clamp(c.responseMs,16.,kMaxScopedResponseMs):16.;
+    c.viewMode=std::clamp(c.viewMode,0,kViewCount);
+    for(auto& v:c.extraViews)if(!usableView(v))v={};
     for(double* p:{&c.countsX,&c.countsY})if(!std::isfinite(*p)||std::abs(*p)<1||std::abs(*p)>1e7)*p=0;
     for(double* p:{&c.lensX,&c.lensY})if(!std::isfinite(*p)||*p<=0||*p>10)*p=0;
     return c;
 }
-inline auto values(const Config& c){return std::tie(c.enabled,c.prediction,c.dryRun,c.outputVerified,c.key,c.point,c.smoothMs,c.strength,c.radiusPx,c.maxRange,c.maxSpeed,c.maxAccel,c.deadzonePx,c.countsX,c.countsY,c.lensX,c.lensY,c.responseMs,c.motionPrediction,c.predictionAmount);}
+inline auto values(const Config& c){return std::tie(c.enabled,c.prediction,c.dryRun,c.outputVerified,c.key,c.point,c.smoothMs,c.strength,c.radiusPx,c.maxRange,c.maxSpeed,c.maxAccel,c.deadzonePx,c.countsX,c.countsY,c.lensX,c.lensY,c.responseMs,c.cameraCommandLimit,c.motionPrediction,c.predictionAmount,c.viewMode);}
+inline Config applyMenuSettings(const Config& current,Config edited){
+    // The menu edits preferences. Calibration is owned by the capture loop
+    // and may have completed after the menu took its settings snapshot.
+    edited.countsX=current.countsX;edited.countsY=current.countsY;
+    edited.lensX=current.lensX;edited.lensY=current.lensY;
+    edited.responseMs=current.responseMs;edited.outputVerified=current.outputVerified;
+    edited.extraViews=current.extraViews;
+    return validated(edited);
+}
 template<class Read> Config load(Read read){
     Config c;
     const auto number=[&](const char* key,double fallback){const std::string text=read(key,std::to_string(fallback).c_str());double v=0;const auto r=std::from_chars(text.data(),text.data()+text.size(),v);return r.ec==std::errc{} && r.ptr==text.data()+text.size() && std::isfinite(v)?v:fallback;};
@@ -51,11 +161,31 @@ template<class Read> Config load(Read read){
     c.responseMs=number("assist_response_ms",16);
     c.motionPrediction=read("assist_motion_prediction","1")=="1";
     c.predictionAmount=number("assist_prediction_amount",100);
-    c.key=int(std::clamp(number("assist_key",0),0.,255.));c.point=int(std::clamp(number("assist_point",2),0.,2.));
+    const auto span=size_t(std::clamp(number("assist_view_span",3),0.,double(kViewCount-1)));
+    for(size_t i=0;i<span;++i){
+        const auto prefix="assist_view_"+std::to_string(i+1)+"_";
+        const auto readView=[&](const char* field,double fallback){return number((prefix+field).c_str(),fallback);};
+        const int limit=readView("command_limit",kLegacyCommandLimit)==kScopedCommandLimit?kScopedCommandLimit:kLegacyCommandLimit;
+        c.extraViews[i]={readView("x",0),readView("y",0),readView("lens_x",0),readView("lens_y",0),readView("response_ms",16),limit};
+    }
+    c.key=int(std::clamp(number("assist_key",0),0.,255.));c.point=int(std::clamp(number("assist_point",2),0.,3.));
     c.smoothMs=number("assist_smooth_ms",120);c.strength=number("assist_strength",.35);c.radiusPx=number("assist_radius_px",120);
     c.maxRange=number("assist_range_m",300);c.maxSpeed=number("assist_speed",700);c.maxAccel=number("assist_accel",3500);
     c.deadzonePx=number("assist_deadzone_px",1);c.countsX=number("assist_counts_x",0);c.countsY=number("assist_counts_y",0);
-    c.lensX=number("assist_lens_x",0);c.lensY=number("assist_lens_y",0);return validated(c);
+    c.lensX=number("assist_lens_x",0);c.lensY=number("assist_lens_y",0);
+    auto& scope=c.scoped;
+    // Existing INIs used shared tuning with a fixed 1000 px scoped radius.
+    scope.point=int(std::clamp(number("assist_scoped_point",c.point),0.,3.));
+    scope.smoothMs=number("assist_scoped_smooth_ms",c.smoothMs);
+    scope.strength=number("assist_scoped_strength",c.strength);
+    scope.radiusPx=number("assist_scoped_radius_px",kScopedSearchRadiusPx);
+    scope.maxRange=number("assist_scoped_range_m",c.maxRange);
+    scope.maxSpeed=number("assist_scoped_speed",c.maxSpeed);
+    scope.maxAccel=number("assist_scoped_accel",c.maxAccel);
+    scope.deadzonePx=number("assist_scoped_deadzone_px",c.deadzonePx);
+    scope.motionPrediction=read("assist_scoped_motion_prediction",c.motionPrediction?"1":"0")=="1";
+    scope.predictionAmount=number("assist_scoped_prediction_amount",c.predictionAmount);
+    return validated(c);
 }
 template<class Write> void save(Config c,Write write){
     c=validated(c);
@@ -65,6 +195,26 @@ template<class Write> void save(Config c,Write write){
     write("assist_response_ms",std::to_string(c.responseMs));
     write("assist_motion_prediction",c.motionPrediction?"1":"0");
     write("assist_prediction_amount",std::to_string(c.predictionAmount));
+    const auto& scope=c.scoped;
+    write("assist_scoped_point",std::to_string(scope.point));
+    write("assist_scoped_motion_prediction",scope.motionPrediction?"1":"0");
+    for(const auto& entry: {std::pair<const char*,double>{"assist_scoped_smooth_ms",scope.smoothMs},
+        {"assist_scoped_strength",scope.strength},{"assist_scoped_radius_px",scope.radiusPx},
+        {"assist_scoped_range_m",scope.maxRange},{"assist_scoped_speed",scope.maxSpeed},
+        {"assist_scoped_accel",scope.maxAccel},{"assist_scoped_deadzone_px",scope.deadzonePx},
+        {"assist_scoped_prediction_amount",scope.predictionAmount}})
+        write(entry.first,std::to_string(entry.second));
+    size_t span=c.extraViews.size();
+    while(span && !usableView(c.extraViews[span-1]))--span;
+    write("assist_view_span",std::to_string(span));
+    for(size_t i=0;i<span;++i){
+        const auto prefix="assist_view_"+std::to_string(i+1)+"_";
+        const auto& view=c.extraViews[i];
+        const auto writeView=[&](const char* field,double value){write((prefix+field).c_str(),std::to_string(value));};
+        writeView("x",view.countsX);writeView("y",view.countsY);
+        writeView("lens_x",view.lensX);writeView("lens_y",view.lensY);writeView("response_ms",view.responseMs);
+        writeView("command_limit",view.commandLimit);
+    }
     write("assist_key",std::to_string(c.key));write("assist_point",std::to_string(c.point));
     for(const auto& entry: {std::pair<const char*,double>{"assist_smooth_ms",c.smoothMs},{"assist_strength",c.strength},
         {"assist_radius_px",c.radiusPx},{"assist_range_m",c.maxRange},{"assist_speed",c.maxSpeed},{"assist_accel",c.maxAccel},
@@ -270,7 +420,8 @@ Diagnostics prepare(const Entities& entities,const Frame& f,const Config& c,uint
     for(const auto& e:entities){
         if(e.kind!=1)continue;
         ++stats.players;
-        Candidate candidate{e.webTrackId,e.jointsUs,e.rootUs,e.hasBones?e.joints[c.point]:Vec3{},e.feet,
+        const Vec3 point=!e.hasBones?Vec3{}:c.point==3?mul(add(e.joints[2],e.joints[3]),.5):e.joints[c.point];
+        Candidate candidate{e.webTrackId,e.jointsUs,e.rootUs,point,e.feet,
             !e.name.empty()&&isFriend(e.name),true,e.hasBones,!e.name.empty(),e.vel,e.posUs};
         Projection position;const auto reason=inspect(candidate,f,c,position);++stats.counts[unsigned(reason)];
         if(reason!=Rejection::Ready&&reason!=Rejection::IdentityPending)continue;
@@ -293,14 +444,64 @@ struct Live {
     bool identified=false;
     double range=0;
     double trackingLeadMs=0;
+    double correctionPx=0;
+};
+struct TrackingLead {
+    Vec3 offset{};
+    double milliseconds=0;
+};
+class ScopeLead {
+    TrackingLead filtered_{};
+    uint64_t at_=0;
+public:
+    void reset(){filtered_={};at_=0;}
+    TrackingLead update(TrackingLead desired,Vec3 currentVelocity,bool directionValid,uint64_t now){
+        if(!at_||now<at_||now-at_>100000){
+            reset();at_=now;return {};
+        }
+        if(directionValid && dayz_camera::dot(filtered_.offset,currentVelocity)<0)filtered_={};
+        const double dt=double(now-at_)/1e6;
+        at_=now;
+        const double alpha=-std::expm1(-dt/.085);
+        filtered_.offset=add(filtered_.offset,mul(sub(desired.offset,filtered_.offset),alpha));
+        filtered_.milliseconds+=(desired.milliseconds-filtered_.milliseconds)*alpha;
+        if(filtered_.milliseconds<.1)filtered_={};
+        return filtered_;
+    }
+};
+class CorrectionFilter {
+    double yaw_=0,pitch_=0;
+    uint64_t at_=0;
+public:
+    void reset(){yaw_=pitch_=0;at_=0;}
+    std::pair<double,double> update(double yaw,double pitch,double errorPx,uint64_t now,bool scoped){
+        const double directFromPx=scoped?160.:24.;
+        const double quietBelowPx=scoped?18.:6.;
+        if(!at_||now<at_||now-at_>=100000){
+            yaw_=yaw;pitch_=pitch;at_=now;return {yaw,pitch};
+        }
+        const double t=std::clamp((errorPx-quietBelowPx)/(directFromPx-quietBelowPx),0.,1.);
+        const double blend=t*t*(3.-2.*t);
+        const double quietTimeUs=scoped?180000.:90000.;
+        const double timeConstantUs=quietTimeUs+(36000.-quietTimeUs)*blend;
+        const double alpha=-std::expm1(-double(now-at_)/timeConstantUs);
+        at_=now;
+        yaw_+=(yaw-yaw_)*alpha;pitch_+=(pitch-pitch_)*alpha;
+        const auto agree=[blend](double current,double filtered){
+            const double effective=filtered+(current-filtered)*blend;
+            if(effective*current<=0.)return 0.;
+            return std::copysign(std::min(std::abs(effective),std::abs(current)),current);
+        };
+        return {agree(yaw,yaw_),agree(pitch,pitch_)};
+    }
 };
 class Engine {
     Config previous_{};uint64_t session_=0,target_=0,last_=0;
-    Motion motion_;Controller controller_;
+    Motion motion_;Controller controller_;ScopeLead scopeLead_;CorrectionFilter correctionFilter_;
     Live live_;
     bool wasBusy_=false,inDeadzone_=false;
     Live stop(const char* why,bool history=true){
-        controller_.reset();last_=0;
+        controller_.reset();scopeLead_.reset();correctionFilter_.reset();last_=0;
         wasBusy_=false;
         inDeadzone_=false;
         if(history){target_=0;motion_.reset();}
@@ -315,7 +516,7 @@ public:
     void suspend(const char* why){stop(why);}
     void reset(){stop("IDLE");session_=0;}
     Live update(Config config,const Frame& f){
-        config=validated(config);
+        config=validated(config,kScopedSearchRadiusPx);
         if(values(config)!=values(previous_)){reset();previous_=config;}
         live_.diagnostics=f.diagnostics?*f.diagnostics:Diagnostics{};
         if(!config.enabled)return stop("OFF");
@@ -341,7 +542,7 @@ public:
         live_.diagnostics=stats;
         if(!selected)return stop(stats.missingReason());
         if(std::count_if(f.candidates->begin(),f.candidates->end(),[&](const Candidate& p){return p.id==selected->id;})!=1)return stop("AMBIGUOUS TARGET ID");
-        if(selected->id!=target_){controller_.reset();motion_.reset();last_=0;wasBusy_=inDeadzone_=false;target_=selected->id;}
+        if(selected->id!=target_){controller_.reset();motion_.reset();scopeLead_.reset();correctionFilter_.reset();last_=0;wasBusy_=inDeadzone_=false;target_=selected->id;}
         const auto previousLive=live_;
         live_={};live_.target=target_;live_.dryRun=config.dryRun;live_.diagnostics=stats;
         live_.identified=selected->identified;live_.errorPx=selectedPosition.pixels;live_.range=selectedPosition.range;
@@ -363,7 +564,11 @@ public:
         const bool freshVelocity=f.directOnly?fresh(selected->positionAt,f.now,100000):motion_.valid();
         const Vec3 velocity=f.directOnly?selected->velocity:motion_.velocity();
         const double speed=norm(velocity);
-        if(!predicted && config.motionPrediction && freshVelocity && speed>=.5 && speed<=15.){
+        const bool stableDirection=freshVelocity && speed>=.5 && speed<=15.;
+        const bool scoped=f.directOnly && config.viewMode>=2;
+        const double enter=std::max(2.5,config.deadzonePx),leave=enter*2.;
+        TrackingLead lead;
+        if(!predicted && config.motionPrediction && stableDirection){
             const double sampleAgeMs=double(f.now-selected->poseAt)/1000.;
             double horizonMs=std::min(65.,(sampleAgeMs+.5*config.responseMs)*config.predictionAmount/100.);
             // Reduce the lead when it would exceed the screen-space limit or
@@ -373,8 +578,8 @@ public:
                 if(project(f,config,add(selected->point,mul(velocity,horizonMs*.001)),estimated)==Rejection::Ready){
                     const double pixels=std::hypot(estimated.x-selectedPosition.x,estimated.y-selectedPosition.y);
                     if(pixels<=12.){
-                        projection=estimated;
-                        live_.trackingLeadMs=horizonMs;
+                        if(scoped)lead={mul(velocity,horizonMs*.001),horizonMs};
+                        else{projection=estimated;live_.trackingLeadMs=horizonMs;}
                         break;
                     }
                     horizonMs*=std::min(.9,12./pixels);
@@ -383,21 +588,53 @@ public:
                 }
             }
         }
-        const double yaw=projection.yaw,pitch=projection.pitch,pixels=projection.pixels;
+        if(scoped && config.motionPrediction){
+            const auto filtered=scopeLead_.update(lead,velocity,stableDirection,f.now);
+            // Start tapering before the larger exit threshold. In the quiet
+            // zone the measured point alone decides whether to resume output.
+            const double t=std::clamp((selectedPosition.pixels-leave)/12.,0.,1.);
+            const double weight=t*t*(3.-2.*t);
+            Projection estimated;
+            if(filtered.milliseconds*weight>=.1 &&
+               project(f,config,add(selected->point,mul(filtered.offset,weight)),estimated)==Rejection::Ready &&
+               std::hypot(estimated.x-selectedPosition.x,estimated.y-selectedPosition.y)<=12.){
+                projection=estimated;live_.trackingLeadMs=filtered.milliseconds*weight;
+            }
+        }
+        double yaw=projection.yaw,pitch=projection.pitch;
+        const double pixels=projection.pixels;
         live_.predictionValid=predicted;live_.flightSeconds=flight;
         if(!config.countsX||!config.countsY||!config.lensX||!config.lensY)return stop("CALIBRATION REQUIRED",false);
         if(std::abs(f.camera.px/config.lensX-1)>.001||std::abs(f.camera.py/config.lensY-1)>.001)return stop("ZOOM CHANGED - recalibrate",false);
         if(!config.dryRun && f.outputPaused)return stop(f.outputIssue?f.outputIssue:"OUTPUT PAUSED - release hold key",false);
         if(!config.dryRun && (!f.deviceReady||!config.outputVerified))return stop(f.outputIssue?f.outputIssue:"OUTPUT BLOCKED - device verification required",false);
-        inDeadzone_=pixels<=config.deadzonePx*(inDeadzone_?1.35:1.);
+        const double rawErrorPx=scoped?selectedPosition.pixels:pixels;
+        live_.correctionPx=pixels;
+        if(f.directOnly && (scoped || live_.trackingLeadMs<=0.)){
+            std::tie(yaw,pitch)=correctionFilter_.update(yaw,pitch,rawErrorPx,f.now,scoped);
+            live_.correctionPx=std::hypot(yaw*f.width*.5/f.camera.px,pitch*f.height*.5/f.camera.py);
+        }else correctionFilter_.reset();
+        const double deadzone=scoped?(inDeadzone_?leave:enter):config.deadzonePx*(inDeadzone_?1.35:1.);
+        inDeadzone_=rawErrorPx<=deadzone || (rawErrorPx<=12. && live_.correctionPx<=deadzone);
         if(inDeadzone_){controller_.reset();last_=f.now;wasBusy_=false;live_.status="IN DEADZONE";return live_;}
         if(f.outputBusy){wasBusy_=true;live_.active=true;live_.status="WAITING FOR OUTPUT INTERVAL / DEVICE";return live_;}
         if(last_ && f.now<last_)return stop("CLOCK DISCONTINUITY");
         const double dt=last_?double(f.now-last_)/1e6:0;
-        const bool completedCycle=wasBusy_ && f.outputCycleComplete;wasBusy_=false;
+        const bool completedCycle=wasBusy_ && f.outputCycleComplete;
         if(last_ && dt<.008){live_.active=previousLive.active;live_.status=previousLive.status;return live_;} // Never resubmit a previous movement.
-        last_=f.now;
-        live_.proposed=controller_.step(yaw*config.countsX,pitch*config.countsY,dt,config,completedCycle?.1:.05,f.commandLimit);
+        last_=f.now;wasBusy_=false;
+        const bool delayedCycle=completedCycle && dt<=.2;
+        int commandLimit=f.commandLimit;
+        if(scoped && commandLimit==kScopedCommandLimit){
+            // Save the larger measured step for acquisition. Slow down before
+            // the existing small-error filter and deadzone take over.
+            const double gain=std::clamp((live_.correctionPx-24.)/96.,0.,1.);
+            commandLimit=kLegacyCommandLimit+int((kScopedCommandLimit-kLegacyCommandLimit)*gain);
+        }
+        // A verified cycle can wait for a later camera sample. Do
+        // not turn the additional wait into an oversized catch-up movement.
+        live_.proposed=controller_.step(yaw*config.countsX,pitch*config.countsY,
+            delayedCycle?std::min(dt,.1):dt,config,completedCycle?.1:.05,commandLimit);
         live_.active=true;live_.status=config.dryRun?"DRY RUN - movement not sent":predicted?"TRACKING - verified prediction":
             live_.trackingLeadMs>0?"TRACKING - latency compensation":"TRACKING - direct";
         return live_;
@@ -408,6 +645,8 @@ struct Runtime {
     Calibration calibration;
     OutputCycle outputCycle;
     bool calibrationStart=false,calibrationApplied=false;
+    bool resumeLiveAfterSetup=false;
+    int measuringView=0;
     dayz_camera::Cam camera{};uint64_t cameraAt=0;
     const char* outputStatus="no movement sent";
     Diagnostics diagnostics;

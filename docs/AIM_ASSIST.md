@@ -1,5 +1,97 @@
 # Aim Assist — direct tracking and guided setup
 
+## Scoped aiming investigation
+
+The original integration stored one pair of lens tangents and one measured
+counts-per-radian mapping. Any lens difference above 0.1% caused the engine
+to block output. Guided setup replaced that same mapping, so calibrating a
+scope also replaced the hipfire calibration.
+
+The reader supplies the DayZ world camera pose and lens to a symmetric
+full-viewport projection. This establishes what the program reads, not what
+DayZ uses inside every optical window. A separate scope camera, reticle offset
+or off-center viewport requires evidence from the rendered game view. The
+live integration also supplies no verified muzzle pose or projectile profile,
+so it does not call the offline ballistic solver.
+
+### Hipfire and Scoped settings
+
+The two Aim Assist tabs save independent tuning, including smoothing, strength,
+prediction, aim point, search radius, range, speed, acceleration, and deadzone.
+The active camera determines which tuning applies. All measured zoom levels
+use the same Scoped tuning and keep their individual mouse calibrations.
+An older INI seeds both tabs with the previous tuning and keeps the scoped
+radius at 1000 pixels. Existing calibration measurements are retained.
+
+1. Open **Scoped → Gefuehrt einrichten** while looking through the desired
+   magnification. Guided setup creates or refreshes the measurement for the
+   current zoom. There is space for 32 zoom measurements alongside Hipfire.
+2. In a stationary practice scene, check that the overlay aligns with the scope
+   at the center and at several points around the reticle. If it does not, leave
+   Dry Run on. The lens and mouse calibration cannot repair a projection mismatch.
+3. Use a latched ADS state if available so the mouse buttons can be released.
+   Start guided setup in that view and wait for the 16 confirmed responses.
+4. Check that the status reads **SCOPED** and **MEASURED** at the intended zoom.
+
+Unmeasured or ambiguous lens values pause output. The current camera data
+cannot distinguish multiple measurements with identical lens values.
+
+The first tight-scope hardware trial reached zero pulses despite a stable lens
+and an answering MAKCU. The original setup required a nearly stationary camera
+before each pulse, which can block scope measurement even with no physical input.
+Zoom profiles now estimate a local drift baseline before each bounded pulse and
+measure the response relative to that baseline. Both signs and both axes still
+have to agree. The hipfire pulse sequence is retained. Synthetic tests cover
+continuous drift with a real pulse response and drift alone without a response.
+In two later hardware attempts, the first pulse validated but no complete
+profile was stored. One trial reported 140.4 ms for the second response, and
+the other hit a camera gap between pulses after a 52.8 ms first response.
+Scope profiles can now store measured response intervals up to 180 ms.
+The legacy output gate waits the full measured interval and still caps the
+controller's integration step. A fresh view with the same camera identity
+can restart the baseline between confirmed pulses. A changed source or an
+interruption during an unconfirmed pulse still aborts.
+
+The first hardware trial with that change sent one horizontal pulse in the
+tight zoom (lens tangents 0.130867 / 0.073612). The drift-corrected camera
+response did not settle within the measurement window. No zoom calibration
+was stored. The deadline result measures the observed camera signal under
+those conditions, not a verified device or HID latency.
+
+The scope sequence now uses balanced positive and negative command pairs on
+each axis, interspersed with four no-input control windows. It samples the
+timestamped camera response across several candidate delays. Pair differences
+estimate the command response without requiring a motionless camera. Separate
+confirmation pairs, cross-axis limits and the no-input windows gate acceptance.
+The saved delay includes a sample timing margin. Hipfire still uses its
+original 16 isolated pulses. The 20 scope windows include 16 physical pulses.
+
+The first live run completed all 20 windows but rejected the profile. Its
+generic status could not distinguish poor sample coverage from inconsistent
+motion. The revised estimator interpolates only across short camera gaps and
+can discard one incomplete pair per axis. It still requires at least three
+usable pairs with independent confirmation and at least one no-input control
+per axis. Rejections now distinguish data coverage, low response,
+inconsistent gain, cross-axis motion and excessive background movement.
+
+Live validation accepted the wider lens at 0.174489 / 0.098150 with a 77 ms
+response and saved it as profile 1. A later run accepted the tighter lens at
+0.130867 / 0.073612 with a 152 ms response. In that run the radar menu could
+overwrite the new profile with its previous settings snapshot before the INI
+save. The radar now applies preference edits without replacing the capture
+loop's measured fields. A regression test submits a stale menu snapshot
+after a profile update.
+
+During a transition with alternate views configured, the legacy output gate
+still waits out the original command interval. Unmatched or ambiguous lenses
+generate no proposals. A new matched profile resets the controller.
+
+The offline tests simulate 100, 300 and 600 m, different elevations, lateral
+motion in both directions, and targets approaching or receding. Test projectile
+parameters are synthetic. A live ballistic implementation still needs the verified
+in-game projectile parameters and the relation between the muzzle, camera and
+zeroed reticle. The UI reports **NO BALLISTIC DATA**.
+
 Optional native aim assistance on branch `feature/aim-assist`. Default: disabled,
 unbound, dry run ON. Uses the existing remote-key snapshot, raw camera, player
 snapshots and MAKCU serial owner. No additional DMA connection, game-memory
@@ -48,10 +140,13 @@ Calibration and Output. Selection/preview runs even with the hold key released.
 3. **Gefuehrt einrichten → Messung starten... → Jetzt messen** explicitly starts
    the attended setup. Stand still, look approximately level, release all Main-PC
    keys/buttons and do not move the physical mouse during the short measurement.
-4. The program measures both axes, stores the mapping only after complete success
-   and leaves dry run ON. No manual counts/radian entry or verification checkbox
-   is required. Failed/cancelled attempts preserve the previous saved calibration.
-5. Inspect dry-run proposals first. Only then switch dry run off yourself to test
+4. The program measures both axes and stores the mapping only after complete
+   success. The setup shows whether it will use a new zoom slot or remeasure the
+   current one. Failed/cancelled attempts preserve saved profiles and leave dry
+   run on. The confirmation can request live output after a successful measurement
+   if the new profile still matches the current camera.
+5. Inspect dry-run proposals first. **Live-Ausgabe einschalten** is available in
+   setup once the active profile matches and the hold key is released. Then test
    following. The same original trigger conditions continue to govern clicks;
    setup/following never issue click commands of their own. Choose a distinct
    hold key if the existing click feature should not be activated by this test.
@@ -326,9 +421,24 @@ still stop calibration. Regression tests exercise all three timing paths.
 Smoothing sets the velocity transition time. Strength sets the tracking gain.
 The controller integrates displacement over the transition and limits speed and
 acceleration, with braking near the aim point and hysteresis around the deadzone.
-The measured legacy output interval and command limit still apply. In the
-80 ms simulation, smoothing at 10, 70 and 300 all starts below the 16-count cap
-and reaches the same steady output for a large fixed error.
+The measured legacy output interval and command limit still apply. A repeated
+measurement on the 0.130867 / 0.073612 lens confirmed a 77 ms interval.
+At 16 counts per interval, this limits sustained correction to about
+208 counts/s regardless of higher speed or strength settings.
+
+Updated Scoped calibration checks signed 12- and 32-count movements on both
+axes. It records the higher limit after the responses agree. Existing
+measurements load with the 16-count limit until remeasured. The controller
+uses the full measured limit at a filtered error of 120 px or above and
+tapers to 16 counts at 24 px. It still waits for the measured device
+interval before the next movement. The Hipfire measurement sequence keeps
+its 16-count maximum.
+
+For camera-paced output, the next correction uses a frame captured after the
+measured settling interval. A frame can be fresh for display and still be too
+early to confirm the previous movement. Hipfire also filters small alternating
+corrections near center when movement lead is inactive. Errors at or above
+24 px retain direct response.
 
 Direct tracking uses the latest world velocity from the position scanner. This
 history remains available when bones briefly go stale or the activation key is
@@ -344,3 +454,22 @@ behavior. The status reports the actual lead used on the current sample.
 **Show search circle** sits below the acquisition radius and controls drawing only.
 With Trigger Debug enabled, `[assist-move]` logs submitted counts, timestamp,
 observed pixel error and lead for a hardware comparison.
+### Fuser video alignment
+
+In DMA fullscreen, **ESP Overlay / Crosshair settings / Fuser alignment**
+controls the video viewport used by world projection, target geometry, the
+search circle and the overlay crosshair. The overlay window and camera lens
+retain their original dimensions. Default values map to the full frame.
+
+Enable **Show alignment guides** and compare the pink center mark with the
+game reticle on the combined display while standing still without a scope.
+Adjust the horizontal and vertical offsets until the centers agree. If the
+center agrees but stable world points shift farther from center, use two
+separated reference points to check the width or height. **Reset alignment**
+restores the full frame. Disable the guides after checking both the center
+and projected models. The guide crosses at the sides sit at 10% and 90% of
+the projected frame. The alignment settings persist. The guides do not.
+
+A screenshot of the second-PC overlay proves where the program drew its own
+marks. The combined-display check is needed to establish how the two video
+inputs line up. A global alignment cannot represent a separate scope viewport.

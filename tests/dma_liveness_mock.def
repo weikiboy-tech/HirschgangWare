@@ -1,6 +1,8 @@
 LIBRARY vmm
 EXPORTS
     TestMode
+    TestLayoutLookups
+    TestMemoryReads
     VMMDLL_Initialize
     VMMDLL_Close
     VMMDLL_MemFree
@@ -10,3 +12,6 @@ EXPORTS
     VMMDLL_ConfigSet
     VMMDLL_ProcessGetInformation
     VMMDLL_MemReadEx
+    VMMDLL_ProcessGetModuleBaseU
+    VMMDLL_ProcessGetInformationAll
+    VMMDLL_WinReg_QueryValueExU

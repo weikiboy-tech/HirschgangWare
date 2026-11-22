@@ -78,6 +78,55 @@ int main() {
     state.update(trigger::remoteSample(),true,trigger::capturing());assert(!state.binding);
     trigger::stopCapture();remote={};
 
+    // A LAN tap can start and finish before the application samples it.
+    trigger::resetRemoteInput();
+    remote.pid=1;remote.transport=dma_keyboard::Transport::Lan;
+    trigger::startCapture(0);trigger::pollInputs();
+    remote.edges['E']={1,1};waitForInputTick();trigger::pollInputs();
+    assert(!trigger::capturing() && trigger::binding(0).key=='E');
+    assert(trigger::binding(0).source==trigger::InputSource::MainPc && !trigger::live().keyHeld);
+    waitForInputTick();trigger::pollInputs(); // Arm the saved binding while released.
+    press('E',true);++remote.edges['E'].pressed;waitForInputTick();trigger::pollInputs();
+    assert(trigger::live().boundHeld[0]);
+    press('E',false);++remote.edges['E'].released;waitForInputTick();trigger::pollInputs();
+    assert(!trigger::live().boundHeld[0] && trigger::remoteSample().edges['E'].released==2);
+    trigger::resetRemoteInput();remote={};
+
+    // Clutch receives the LAN sender even if the shared Trigger snapshot is PCIe.
+    trigger::setRemoteInputNeeded(false);
+    const dma_keyboard::Sample pcie{123, {}, dma_keyboard::Transport::Pcie};
+    dma_keyboard::Sample lan{1, {}, dma_keyboard::Transport::Lan};
+    clutch::State lanClutch;
+    lanClutch.configure({true, 'E', clutch::Activation::Toggle});
+    lanClutch.update(clutch::mainPcInput(lan, pcie, true), true);
+    lan.edges['E'] = {1, 1};
+    lanClutch.update(clutch::mainPcInput(lan, pcie, true), true);
+    assert(lanClutch.active && lanClutch.lastInput().transport == dma_keyboard::Transport::Lan);
+    lanClutch.update(clutch::mainPcInput(lan, {}, false), true);
+    assert(lanClutch.active); // Rereading the same input does not toggle again.
+    lan.edges['E'] = {2, 2};
+    lanClutch.update(clutch::mainPcInput(lan, {}, false), true);
+    assert(!lanClutch.active);
+    lan.edges['E'] = {3, 3};
+    lanClutch.update(clutch::mainPcInput(lan, {}, false), true);
+    assert(lanClutch.active);
+    lanClutch.update(clutch::mainPcInput({}, lan, true), true);
+    assert(!lanClutch.active && !lanClutch.ready);
+
+    // With AllKeys, a held key must not stall the capture of a different key.
+    clutch::State lanCapture;
+    lanCapture.beginBinding();
+    remote=lan;
+    press('A',true);
+    ++remote.edges['A'].pressed;
+    lanCapture.update(remote,true);
+    assert(lanCapture.binding && !lanCapture.boundKey);
+    ++remote.edges['Y'].pressed;
+    ++remote.edges['Y'].released;
+    lanCapture.update(remote,true);
+    assert(!lanCapture.binding && lanCapture.boundKey=='Y');
+    remote={};
+
     // Real Windows INI round-trip through the production codecs, preserving other keys.
     char dir[MAX_PATH],path[MAX_PATH];GetTempPathA(MAX_PATH,dir);GetTempFileNameA(dir,"clu",0,path);
     WritePrivateProfileStringA("ESP","names","1",path);

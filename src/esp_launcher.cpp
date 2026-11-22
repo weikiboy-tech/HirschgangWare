@@ -220,6 +220,11 @@ void loadSettings(EspSettings& s) {
     const auto style = GetPrivateProfileIntA(readSection(), "crosshair_style", int(s.crosshairStyle), readIniPath().c_str());
     if (style <= unsigned(crosshair::Style::Dot)) s.crosshairStyle = crosshair::Style(style);
     s.crosshairColor = GetPrivateProfileIntA(readSection(), "crosshair_color", s.crosshairColor, readIniPath().c_str()) & 0xFFFFFF;
+    s.videoAlignment = overlay_viewport::validated({
+        int(GetPrivateProfileIntA(readSection(), "overlay_align_x", 0, readIniPath().c_str())),
+        int(GetPrivateProfileIntA(readSection(), "overlay_align_y", 0, readIniPath().c_str())),
+        int(GetPrivateProfileIntA(readSection(), "overlay_align_width", overlay_viewport::kFull, readIniPath().c_str())),
+        int(GetPrivateProfileIntA(readSection(), "overlay_align_height", overlay_viewport::kFull, readIniPath().c_str()))});
     s.enemyColor = GetPrivateProfileIntA(readSection(), "esp_enemy_color", s.enemyColor, readIniPath().c_str()) & 0xFFFFFF;
 }
 
@@ -290,6 +295,10 @@ void saveSettings(const EspSettings& s) {
     writeString("crosshair_size", std::to_string(s.crosshairSize));
     writeString("crosshair_style", std::to_string(int(s.crosshairStyle)));
     writeString("crosshair_color", std::to_string(s.crosshairColor));
+    writeString("overlay_align_x", std::to_string(s.videoAlignment.x));
+    writeString("overlay_align_y", std::to_string(s.videoAlignment.y));
+    writeString("overlay_align_width", std::to_string(s.videoAlignment.width));
+    writeString("overlay_align_height", std::to_string(s.videoAlignment.height));
     writeString("esp_enemy_color", std::to_string(s.enemyColor));
 }
 

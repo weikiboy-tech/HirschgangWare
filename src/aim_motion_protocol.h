@@ -3,6 +3,9 @@
 #include <string>
 
 namespace aim_assist {
+inline constexpr int kLegacyCommandLimit=16;
+inline constexpr int kScopedCommandLimit=32;
+
 // Read-only pending-motion queries, consumed by the existing serial owner.
 // A fresh channel reply can restore a previously measured profile. It cannot
 // establish a new movement calibration.

@@ -22,6 +22,12 @@ inline Config validated(Config value) {
     if (value.activation != Activation::Hold) value.activation = Activation::Toggle;
     return value;
 }
+inline dma_keyboard::Sample mainPcInput(const dma_keyboard::Sample& lan,
+                                       const dma_keyboard::Sample& shared, bool dma) {
+    if (lan.pid) return lan;
+    if (dma && shared.transport == dma_keyboard::Transport::Pcie) return shared;
+    return {};
+}
 template<class Read> Config load(Read read) {
     Config config;
     config.enabled=read("clutch_enabled","0")=="1";
@@ -43,13 +49,14 @@ template<class Write> void save(Config config, Write write) {
 // Runtime only: never persisted. All calls belong to the UI/render thread.
 class State {
     Config config_;
-    uint32_t pid_ = 0;
+    dma_keyboard::Sample previous_;
     bool armed_ = false, wasDown_ = false, captureArmed_ = false;
 public:
     bool active = false, ready = false, binding = false, escapeConsumed = false;
     int boundKey = 0;
     const Config& config() const { return config_; }
-    void reset() { active=false;ready=false;armed_=false;wasDown_=false;pid_=0;captureArmed_=false; }
+    const dma_keyboard::Sample& lastInput() const { return previous_; }
+    void reset() { active=false;ready=false;armed_=false;wasDown_=false;previous_={};captureArmed_=false; }
     void configure(Config config) {
         config=validated(config);
         if (config.enabled!=config_.enabled || config.key!=config_.key || config.activation!=config_.activation) {
@@ -64,31 +71,49 @@ public:
         return escapeConsumed;
     }
     void update(const dma_keyboard::Sample& sample, bool running, bool triggerBinding=false, bool localEscape=false) {
-        const bool escape=sample.pid && dma_keyboard::down(sample.bits,27);
+        const bool escape=sample.pid && (dma_keyboard::down(sample.bits,27) ||
+            dma_keyboard::edgesSince(previous_,sample,27).pressed);
         if (!escape && !localEscape) escapeConsumed=false;
         if (binding && (escape || localEscape)) { cancelEscape();return; }
         if (triggerBinding) { cancelBinding();return; }
         if (!running || !sample.pid) { reset();return; }
-        if (pid_!=sample.pid) { reset();pid_=sample.pid; }
+        if (!dma_keyboard::sameSource(previous_,sample)) reset();
         ready=true;
         if (binding) {
+            if (!captureArmed_) {
+                // Existing held keys are the baseline. Capture the next new press.
+                previous_=sample;
+                captureArmed_=true;
+                return;
+            }
             int key=0,count=0;
-            for (int k=8;k<255;++k) if (dma_keyboard::down(sample.bits,unsigned(k))) { ++count;key=k; }
-            if (!count) captureArmed_=true;
-            else if (captureArmed_) {
-                if (count==1 && bindable(key)) {
-                    boundKey=key;binding=false;active=false;armed_=false;wasDown_=true;
+            for (int k=8;k<255;++k) {
+                if (!bindable(k)) continue;
+                const auto vk=unsigned(k);
+                const auto pressed=sample.transport==dma_keyboard::Transport::Lan
+                    ? dma_keyboard::edgesSince(previous_,sample,vk).pressed!=0
+                    : dma_keyboard::down(sample.bits,vk) && !dma_keyboard::down(previous_.bits,vk);
+                if (pressed) {
+                    ++count;key=k;
                 }
-                captureArmed_=false;
+            }
+            previous_=sample;
+            if (count==1) {
+                boundKey=key;binding=false;active=false;armed_=false;wasDown_=true;
             }
             return;
         }
-        if (!config_.enabled || !bindable(config_.key)) { active=false;armed_=false;return; }
+        if (!config_.enabled || !bindable(config_.key)) { previous_=sample;active=false;armed_=false;return; }
         const bool down=dma_keyboard::down(sample.bits,unsigned(config_.key));
-        if (!down) armed_=true;
+        const auto edges=dma_keyboard::edgesSince(previous_,sample,unsigned(config_.key));
+        previous_=sample;
+        const bool wasArmed=armed_;
+        if (!down || edges.released) armed_=true;
         if (!armed_) { active=false;wasDown_=down;return; }
         if (config_.activation==Activation::Hold) active=down;
-        else if (down && !wasDown_) active=!active;
+        else if (sample.transport==dma_keyboard::Transport::Lan) {
+            if ((wasArmed || edges.released) && (edges.pressed & 1u)) active=!active;
+        } else if (down && !wasDown_) active=!active;
         wasDown_=down;
     }
 };

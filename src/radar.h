@@ -11,6 +11,7 @@
 #include "radar_corpses.h"
 #include "radar_events.h"
 #include "crosshair.h"
+#include "overlay_viewport.h"
 #include "clutch.h"
 #include "aim_assist.h"
 #include "player_health.h"
@@ -109,9 +110,12 @@ struct Config {
         aim_assist::Config assist;
         bool assistBind=false,assistCancel=false;
         bool assistSetupStart=false,assistSetupCancel=false,assistSetupReset=false;
+        bool assistSetupResumeLive=false;
         clutch::Config clutch;
         bool clutchActive = false, clutchReady = false, clutchBinding = false;
         bool clutchBind = false, clutchCancel = false;
+        bool clutchOverLan = false, clutchKeyHeld = false;
+        dma_keyboard::EdgeCounts clutchEdges;
         bool skeleton = true, box = false, names = true, distance = true;
         bool fps = true, uncapped = true;
         bool held = true;
@@ -124,6 +128,8 @@ struct Config {
         int crosshairSize = 5;
         crosshair::Style crosshairStyle = crosshair::Style::Plus;
         COLORREF crosshairColor = crosshair::kDefaultColor;
+        overlay_viewport::Alignment videoAlignment;
+        bool fullscreenDma = false, showAlignmentGuides = false;
         COLORREF enemyColor = RGB(255, 78, 96);
     } esp;
     webmap::Options webmap;

@@ -206,6 +206,8 @@ void pollInputs();
 void setRemoteInputNeeded(bool needed);
 dma_keyboard::Sample remoteSample();
 bool remoteKeysReady();
+bool remoteKeysOverLan();
+void resetRemoteInput();
 const char* keySourceLabel(int slot = 0);
 const std::string& ident();
 void sendRaw(const std::string& cmd);
@@ -216,7 +218,7 @@ bool motionDeviceReady(); // Known MAKCU identity on the existing serial connect
 bool motionSetupAvailable();
 bool beginMotionSetup(); // Called only after explicit UI confirmation; never emits a movement.
 bool beginMotionRestore(); // Read-only channel verification for a measured profile.
-bool calibrationMove(int dx,int dy,uint64_t deadlineUs);
+bool calibrationMove(int dx,int dy,uint64_t deadlineUs,bool scoped);
 void endMotionSetup(bool measured);
 void serviceMotion(); // Nonblocking query on the existing owner; no second reader/writer.
 const aim_assist::MotionProtocol& motionFeedback();

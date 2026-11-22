@@ -15,6 +15,12 @@ namespace dma_keyboard {
 
 inline constexpr DWORD kKernel = VMMDLL_PID_PROCESS_WITH_KERNELMEMORY;
 inline constexpr int kWildcard = -1;
+inline constexpr DWORD kVerifiedBuild = 26200;
+inline constexpr DWORD kVerifiedRevision = 9711;
+
+inline bool verifiedVersion(DWORD build, DWORD revision) {
+    return build == kVerifiedBuild && revision == kVerifiedRevision;
+}
 
 struct Reader {
     VMM_HANDLE handle = nullptr;
@@ -41,13 +47,19 @@ struct Reader {
         const std::string revisionPath = std::string(root) + "UBR";
         wchar_t build[32]{};
         DWORD revision = 0, type = 0, size = sizeof build - sizeof(wchar_t);
-        if (!registry(handle, buildPath.c_str(), &type, reinterpret_cast<PBYTE>(build), &size) || type != REG_SZ)
+        if (!registry(handle, buildPath.c_str(), &type, reinterpret_cast<PBYTE>(build), &size) ||
+            type != REG_SZ || size >= sizeof build || size % sizeof(wchar_t) != 0)
             throw std::runtime_error("Could not read target Windows build.");
+        std::wstring buildNumber(build, size / sizeof(wchar_t));
+        if (!buildNumber.empty() && buildNumber.back() == L'\0') buildNumber.pop_back();
+        if (buildNumber.empty() || !std::all_of(buildNumber.begin(), buildNumber.end(),
+                [](wchar_t digit) { return digit >= L'0' && digit <= L'9'; }))
+            throw std::runtime_error("Invalid target Windows build number.");
         size = sizeof revision;
         if (!registry(handle, revisionPath.c_str(), &type, reinterpret_cast<PBYTE>(&revision), &size) ||
             type != REG_DWORD || size != sizeof revision)
             throw std::runtime_error("Could not read target Windows revision.");
-        return {std::stoul(build), revision};
+        return {std::stoul(buildNumber), revision};
     }
 };
 

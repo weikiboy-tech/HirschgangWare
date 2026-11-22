@@ -56,6 +56,22 @@ inline bool fresh(uint64_t stamp, uint64_t now, uint64_t maxAge) {
     return stamp && now >= stamp && now - stamp < maxAge;
 }
 
+// Drawing can retain the previous projection across a brief DMA stall.
+// Input and targeting still use kProjectionMaxAgeUs.
+constexpr uint64_t kVisualHoldMaxAgeUs = 120000;
+struct VisualProjection {
+    uint64_t world=0, source=0, at=0;
+    float lensX=0, lensY=0;
+    long left=0, top=0, right=0, bottom=0;
+
+    bool canHold(const VisualProjection& current,uint64_t now) const {
+        return world && source && world==current.world && source==current.source &&
+            lensX==current.lensX && lensY==current.lensY &&
+            left==current.left && top==current.top && right==current.right && bottom==current.bottom &&
+            current.at>=at && current.at<=now && fresh(at,now,kVisualHoldMaxAgeUs);
+    }
+};
+
 inline bool matchesSource(uint64_t snapshotWorld, uint64_t cameraWorld, uint64_t readAddress, uint64_t activeCamera) {
     return snapshotWorld && snapshotWorld == cameraWorld && readAddress && readAddress == activeCamera;
 }

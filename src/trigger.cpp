@@ -142,7 +142,8 @@ bool boxInputEnabled(int slot = 0) {
 
 void captureBox(int key, int hid) {
     if (gCapture && key == VK_ESCAPE) { cancelCaptureEscape(); return; }
-    if (gCapture && gCaptureArmed && gCfg.keyFromDevice && !remoteKeysReady() &&
+    if (gCapture && gCaptureArmed && gCfg.keyFromDevice &&
+        (!remoteKeysReady() || (remoteKeysOverLan() && key >= 1 && key <= 5)) &&
         ((key >= 1 && key <= 5) || dma_keyboard::validKey(unsigned(key))))
         bindKey(key, hid, InputSource::Box);
 }
@@ -799,9 +800,10 @@ bool resumeMotionOutput(){
     if(!motionSetupAvailable() || !gMotion.resume())return false;
     serviceMotion();return true; // Read-only positive control; never a movement.
 }
-bool calibrationMove(int dx,int dy,uint64_t deadlineUs){
+bool calibrationMove(int dx,int dy,uint64_t deadlineUs,bool scoped){
+    const int limit=scoped?aim_assist::kScopedCommandLimit:aim_assist::kLegacyCommandLimit;
     if(!gMotionSetup || !motionSetupAvailable() || !gMotion.idleFresh(qpcUs()) || qpcUs()>deadlineUs ||
-       (!dx&&!dy)||std::abs(dx)>16||std::abs(dy)>16||(dx&&dy))return false;
+       (!dx&&!dy)||dx<-limit||dx>limit||dy<-limit||dy>limit||(dx&&dy))return false;
     char command[64];std::snprintf(command,sizeof command,gMotion.cameraOnly?"km.move(%d,%d)":"km.move_now(%d,%d)",dx,dy);
     if(!deviceSend(command)){gMotion.fail("Calibration write failed");return false;}
     gMotion.moved(true);return true;
@@ -876,6 +878,7 @@ namespace {
 
 dma_keyboard::Sample (*gRemoteKeys)() = nullptr;
 dma_keyboard::Sample gRemote;
+dma_keyboard::Sample gPreviousRemote;
 dma_keyboard::Bitmap gRemoteInitiallyDown;
 ULONGLONG gRemoteAt = 0;
 bool gRemoteInputNeeded = false;
@@ -896,7 +899,13 @@ bool remoteInitiallyDown(int key) {
     return vk && dma_keyboard::down(gRemoteInitiallyDown, unsigned(vk));
 }
 
+bool remotePressed(int key) {
+    const int vk = keyToVk(key);
+    return vk && dma_keyboard::edgesSince(gPreviousRemote, gRemote, unsigned(vk)).pressed;
+}
+
 void sampleRemote(ULONGLONG now) {
+    gPreviousRemote = gRemote;
     if (!gRemoteKeys || (!gRemoteInputNeeded && !gCapture && !usesRemote(0) && !usesRemote(1))) {
         gRemote = {};
         gRemoteAt = 0;
@@ -905,12 +914,20 @@ void sampleRemote(ULONGLONG now) {
     if (gRemoteAt && now - gRemoteAt < 8) return;
     gRemoteAt = now;
     const auto current = gRemoteKeys();
-    if (current.pid != gRemote.pid) {
+    if (current.pid != gRemote.pid || current.transport != gRemote.transport) {
         gRemoteInitiallyDown = current.bits;
-        tlog("[trg] PCIe keyboard %s", current.pid ? "connected" : "disconnected");
+        const auto transport = current.pid ? current.transport : gRemote.transport;
+        tlog("[trg] %s keyboard %s", transport == dma_keyboard::Transport::Lan ? "LAN" : "PCIe",
+             current.pid ? "connected" : "disconnected");
     } else {
         for (size_t i = 0; i < current.bits.size(); ++i)
             gRemoteInitiallyDown[i] &= current.bits[i];
+        if (current.transport == dma_keyboard::Transport::Lan) {
+            for (unsigned vk = 8; vk < 255; ++vk) {
+                if (dma_keyboard::down(gRemoteInitiallyDown, vk) && dma_keyboard::edgesSince(gRemote, current, vk).released)
+                    gRemoteInitiallyDown[vk / 4] &= uint8_t(~(1u << (2 * (vk % 4))));
+            }
+        }
     }
     gRemote = current;
 }
@@ -926,21 +943,21 @@ int firstBinding(IsDown down) {
 
 bool captureInputs() {
     if (!gCapture) return false;
-    if (localKeyDown(VK_ESCAPE) || remoteDown(VK_ESCAPE)) {
+    if (localKeyDown(VK_ESCAPE) || remoteDown(VK_ESCAPE) || remotePressed(VK_ESCAPE)) {
         cancelCaptureEscape();
         return true;
     }
     const int local = firstBinding(localKeyDown);
     if (!gCaptureArmed) {
         const int remote = firstBinding(remoteDown);
-        const bool boxHeld = connected() && gCfg.keyFromDevice && !gRemote.pid &&
-            (gKeyHeld || std::any_of(std::begin(gBtn) + 1, std::end(gBtn), [](bool held) { return held; }));
+        const bool boxHeld = connected() && gCfg.keyFromDevice && (!gRemote.pid || remoteKeysOverLan()) &&
+            ((!gRemote.pid && gKeyHeld) || std::any_of(std::begin(gBtn) + 1, std::end(gBtn), [](bool held) { return held; }));
         gCaptureArmed = !local && !remote && !boxHeld;
     } else if (local) {
         bindKey(local, vkToHid(local), InputSource::SecondPc);
     } else {
         const int remote = firstBinding([](int key) {
-            return remoteDown(key) && !remoteInitiallyDown(key);
+            return (remoteDown(key) || remotePressed(key)) && !remoteInitiallyDown(key);
         });
         if (remote) bindKey(remote, vkToHid(remote), InputSource::MainPc);
     }
@@ -990,7 +1007,11 @@ void pollInputs() {
     for (int slot = 0; slot < 2; ++slot) {
         const bool rawHeld = boundDown(slot);
         const bool held = remoteMouseSettling(now, slot) ? gRemote.pid && gLive.boundHeld[size_t(slot)] : rawHeld;
-        if (gWaitForBoundRelease[size_t(slot)] && !rawHeld) gWaitForBoundRelease[size_t(slot)] = false;
+        if (gWaitForBoundRelease[size_t(slot)]) {
+            const int vk = usesRemote(slot) ? keyToVk(binding(slot).key) : 0;
+            if (!rawHeld || (vk && dma_keyboard::edgesSince(gPreviousRemote, gRemote, unsigned(vk)).released))
+                gWaitForBoundRelease[size_t(slot)] = false;
+        }
         gLive.boundHeld[size_t(slot)] = held && !gWaitForBoundRelease[size_t(slot)];
     }
     const bool activated = gLive.boundHeld[0] || gLive.boundHeld[1];
@@ -1004,9 +1025,11 @@ void pollInputs() {
 }
 
 bool remoteKeysReady() { return gRemote.pid != 0; }
+bool remoteKeysOverLan() { return remoteKeysReady() && gRemote.transport == dma_keyboard::Transport::Lan; }
+void resetRemoteInput() { gPreviousRemote = {}; gRemote = {}; gRemoteInitiallyDown = {}; gRemoteAt = 0; }
 
 const char* keySourceLabel(int slot) {
-    if (usesRemote(slot)) return "Main PC";
+    if (usesRemote(slot)) return remoteKeysOverLan() ? "Main PC (LAN)" : "Main PC";
     if (binding(slot).source == InputSource::SecondPc) return "Second PC";
     if (binding(slot).source == InputSource::Box) return "Box";
     return "Local / box";

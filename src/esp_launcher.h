@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "crosshair.h"
+#include "overlay_viewport.h"
 #include "clutch.h"
 #include "aim_assist.h"
 #include "loot.h"
@@ -71,6 +72,8 @@ struct EspSettings {
     int crosshairSize = 5;
     crosshair::Style crosshairStyle = crosshair::Style::Plus;
     COLORREF crosshairColor = crosshair::kDefaultColor;
+    overlay_viewport::Alignment videoAlignment;
+    bool showAlignmentGuides = false; // Preview for the current session only.
     COLORREF enemyColor = RGB(255, 78, 96);
 };
 

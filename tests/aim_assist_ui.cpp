@@ -34,6 +34,15 @@ int main(){
     assert(labels.count("##prediction-amount"));
     config.assist.motionPrediction=false;
     frame();assert(!labels.count("##prediction-amount"));
+    changed=false;
+    click("Scoped");
+    assert(!changed && labels.count("##prediction-amount"));
+    assert(!labels.count("##view-mode") && !labels.count("##calibration-profile"));
+    click("##smoothing");click("##strength");click("Head");
+    assert(changed && config.assist.scoped.smoothMs!=120 && config.assist.scoped.strength!=.35);
+    assert(config.assist.scoped.point==0 && config.assist.point==2);
+    assert(config.assist.smoothMs==120 && config.assist.strength==.35);
+    click("Hipfire");assert(!labels.count("##prediction-amount"));
     config.assist.motionPrediction=true;frame();
     for(int i=0;i<3;++i){
         click("Gefuehrt einrichten");assert(labels.count("Einrichtung schliessen"));

@@ -11,9 +11,15 @@ extern "C" {
 
 // Test DLL only; never copied into the application's DMA directory.
 static int mode=0;
+static unsigned layoutLookups=0;
+static unsigned memoryReads=0;
 constexpr ULONG64 image=0x140000000ull, object=0xffff800000001000ull;
-extern "C" void TestMode(int value) { mode=value; }
-extern "C" VMM_HANDLE VMMDLL_Initialize(DWORD,LPCSTR[]) { return reinterpret_cast<VMM_HANDLE>(1); }
+extern "C" void TestMode(int value) { mode=value; layoutLookups=0; memoryReads=0; }
+extern "C" unsigned TestLayoutLookups() { return layoutLookups; }
+extern "C" unsigned TestMemoryReads() { return memoryReads; }
+extern "C" VMM_HANDLE VMMDLL_Initialize(DWORD,LPCSTR[]) {
+    return mode==10 ? nullptr : reinterpret_cast<VMM_HANDLE>(1);
+}
 extern "C" VOID VMMDLL_Close(VMM_HANDLE) {}
 extern "C" VOID VMMDLL_MemFree(PVOID p) { free(p); }
 extern "C" BOOL VMMDLL_PidGetFromName(VMM_HANDLE,LPCSTR,PDWORD pid) { *pid=1234;return TRUE; }
@@ -32,10 +38,46 @@ extern "C" BOOL VMMDLL_ProcessGetInformation(VMM_HANDLE,DWORD,PVMMDLL_PROCESS_IN
     if (*size!=sizeof(*info) || info->magic!=VMMDLL_PROCESS_INFORMATION_MAGIC) return FALSE;
     info->dwPID=mode==3 ? 999 : 1234;
     info->dwState=mode==2 ? 1 : 0;
+    info->win.dwSessionId=1;
     info->win.vaEPROCESS=mode==8 ? 0 : mode==4 ? object+0x1000 : object;
     *size=sizeof(*info);return TRUE;
 }
+extern "C" ULONG64 VMMDLL_ProcessGetModuleBaseU(VMM_HANDLE,DWORD,LPCSTR) {
+    ++layoutLookups;
+    return 0;
+}
+extern "C" BOOL VMMDLL_ProcessGetInformationAll(VMM_HANDLE,PVMMDLL_PROCESS_INFORMATION*,PDWORD) {
+    ++layoutLookups;
+    return FALSE;
+}
+extern "C" BOOL VMMDLL_WinReg_QueryValueExU(VMM_HANDLE,LPCSTR path,LPDWORD type,LPBYTE data,LPDWORD size) {
+    const char* name = strrchr(path, '\\');
+    if (!name) return FALSE;
+    ++name;
+    if (strcmp(name, "CurrentBuild") == 0) {
+        constexpr wchar_t current[] = L"26200";
+        constexpr wchar_t malformed[] = L"26200invalid";
+        if (mode==11) {
+            if (*size<sizeof malformed) return FALSE;
+            memcpy(data,malformed,sizeof malformed);
+            *size=sizeof malformed;
+        } else {
+            if (*size<sizeof current) return FALSE;
+            memcpy(data,current,sizeof current);
+            *size=sizeof current;
+        }
+        *type=REG_SZ;
+        return TRUE;
+    }
+    if (strcmp(name, "UBR") != 0 || mode==13 || *size<sizeof(DWORD)) return FALSE;
+    const DWORD revision = mode==12 ? 9711 : 9974;
+    memcpy(data,&revision,sizeof revision);
+    *size=sizeof revision;
+    *type=REG_DWORD;
+    return TRUE;
+}
 extern "C" BOOL VMMDLL_MemReadEx(VMM_HANDLE,DWORD pid,ULONG64 address,PBYTE bytes,DWORD length,PDWORD got,ULONG64 flags) {
+    ++memoryReads;
     *got=0;
     if (mode==1) return FALSE; // DLL still returns cached active process metadata.
     if (pid==4 && address==object && length==16) {

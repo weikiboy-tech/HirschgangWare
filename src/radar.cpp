@@ -3,6 +3,7 @@
 #include "radar.h"
 #include "brand.h"
 #include "friends.h"
+#include "lan_keyboard.h"
 #include "trigger.h"
 #include "clock.h"
 
@@ -1378,19 +1379,29 @@ void drawAimAssist(Config::Esp& esp,bool& changed) {
     if(chip("Clear",false,52.f)){config.key=0;esp.assistCancel=true;changed=true;}
     ImGui::EndDisabled();
     changed|=switchRow("Dry run (no mouse output)",&config.dryRun);
-    const auto slider=[&](const char* id,double& value,float lo,float hi,const char* format){float number=float(value);ImGui::SetNextItemWidth(-1);if(ImGui::SliderFloat(id,&number,lo,hi,format)){value=number;changed=true;}};
-    slider("##smoothing",config.smoothMs,10,500,"smoothing %.0f ms");
-    slider("##strength",config.strength,0,1,"strength %.2f");
-    changed|=switchRow("Movement prediction",&config.motionPrediction);
-    if(config.motionPrediction){
-        slider("##prediction-amount",config.predictionAmount,25,150,"prediction %.0f%%");
-        if(ImGui::IsItemHovered())ImGui::SetTooltip("Lead based on observed player movement. No projectile drop calculation.");
-    }
-    slider("##area",config.radiusPx,10,600,"acquisition %.0f px");
     changed|=switchRow("Show search circle",&config.showArea);
-    if(ImGui::IsItemHovered())ImGui::SetTooltip("Draw the radius around the crosshair. Target acquisition uses the radius either way.");
-    int point=config.point==0?0:1;ImGui::SetNextItemWidth(130.f);
-    if(ImGui::Combo("Aim point",&point,"Head\0Chest\0")){config.point=point==0?0:2;changed=true;}
+    if(ImGui::IsItemHovered())ImGui::SetTooltip("Draw the active mode's radius around the crosshair.");
+    static bool scopedTab=false;
+    const float tabWidth=(ImGui::GetContentRegionAvail().x-ImGui::GetStyle().ItemSpacing.x)*.5f;
+    if(chip("Hipfire",!scopedTab,tabWidth))scopedTab=false;
+    ImGui::SameLine();
+    if(chip("Scoped",scopedTab,tabWidth))scopedTab=true;
+    auto& tuning=scopedTab?config.scoped:static_cast<aim_assist::Tuning&>(config);
+    const auto slider=[&](const char* id,double& value,float lo,float hi,const char* format){float number=float(value);ImGui::SetNextItemWidth(-1);if(ImGui::SliderFloat(id,&number,lo,hi,format)){value=number;changed=true;}};
+    slider("##smoothing",tuning.smoothMs,10,500,"smoothing %.0f ms");
+    if(ImGui::IsItemHovered())ImGui::SetTooltip("Lower values react faster.");
+    slider("##strength",tuning.strength,0,1,"strength %.2f");
+    if(ImGui::IsItemHovered())ImGui::SetTooltip("Higher values apply more correction per update.");
+    changed|=switchRow("Movement prediction",&tuning.motionPrediction);
+    if(tuning.motionPrediction){
+        slider("##prediction-amount",tuning.predictionAmount,25,150,"prediction %.0f%%");
+        if(ImGui::IsItemHovered())ImGui::SetTooltip("Lead based on observed player movement.");
+    }
+    slider("##area",tuning.radiusPx,10,scopedTab?float(aim_assist::kScopedSearchRadiusPx):600.f,"search radius %.0f px");
+    ImGui::TextUnformatted("Aim point");
+    changed|=ImGui::RadioButton("Head",&tuning.point,0);
+    ImGui::SameLine();changed|=ImGui::RadioButton("Upper Chest",&tuning.point,2);
+    ImGui::SameLine();changed|=ImGui::RadioButton("Center Mass",&tuning.point,3);
     // Status messages vary with live targets. Reserve their height so the setup
     // buttons cannot jump under the pointer between mouse-down and mouse-up.
     ImGui::BeginChild("assist-readiness",ImVec2(0,ImGui::GetTextLineHeightWithSpacing()*16+8),ImGuiChildFlags_None);
@@ -1398,64 +1409,113 @@ void drawAimAssist(Config::Esp& esp,bool& changed) {
     ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(live.active?th::Accent:th::Text),"%s",runtime.hotkey.binding?"BINDING":live.status);
     ImGui::PopTextWrapPos();
     ImGui::Separator();
-    ImGui::TextWrapped("Input: %s",runtime.hotkey.binding?"BINDING":runtime.hotkey.ready?"READY":"NO MAIN-PC INPUT");
+    const auto remote=trigger::remoteSample();
+    if(!runtime.hotkey.binding && runtime.hotkey.ready && remote.transport==dma_keyboard::Transport::Lan &&
+       dma_keyboard::validKey(unsigned(config.key))) {
+        const auto counts=remote.edges[unsigned(config.key)];
+        ImGui::TextWrapped("LAN input: %s (%u down / %u up)",runtime.hotkey.active?"HELD":"RELEASED",
+                           counts.pressed,counts.released);
+    } else ImGui::TextWrapped("Input: %s",runtime.hotkey.binding?"BINDING":runtime.hotkey.ready?"READY":"NO MAIN-PC INPUT");
     if(!config.enabled)ImGui::TextUnformatted("Target: feature disabled");
     else if(runtime.calibration.running())ImGui::TextUnformatted("Target: following paused for setup");
     else if(live.target)ImGui::TextWrapped("Target: %s %llu | %.1f m | %.1f px",live.identified?"ACQUIRED":"IDENTITY PENDING",
         static_cast<unsigned long long>(live.target),live.range,live.errorPx);
     else ImGui::TextWrapped("Target: %s",live.diagnostics.missingReason());
     const bool cameraFresh=aim_assist::fresh(runtime.cameraAt,qpcUs(),35000);
-    const bool calibrated=config.countsX && config.countsY && config.lensX && config.lensY;
-    const bool lensMatches=calibrated && dayz_camera::validLens(runtime.camera) && std::abs(runtime.camera.px/config.lensX-1)<=.001 && std::abs(runtime.camera.py/config.lensY-1)<=.001;
-    ImGui::TextWrapped("Calibration: %s",runtime.calibration.running()?runtime.calibration.status():!calibrated?"SETUP REQUIRED":!cameraFresh?"WAITING FOR FRESH CAMERA":!lensMatches?"ZOOM CHANGED - return to measured view":"MEASURED");
+    const int view=aim_assist::activeView(config,runtime.camera);
+    const bool scoped=aim_assist::scopedView(config,runtime.camera,view);
+    if(cameraFresh)ImGui::TextWrapped("Current search radius: %.0f px",aim_assist::searchRadius(config,runtime.camera,view));
+    const bool lensMatches=view>=0;
+    const auto savedScopes=std::count_if(config.extraViews.begin(),config.extraViews.end(),aim_assist::usableView);
+    ImGui::TextWrapped("Active mode: %s",!cameraFresh?"CAMERA UNAVAILABLE":view<0 && !scoped?"WAITING FOR MATCH":scoped?"SCOPED":"HIPFIRE");
+    ImGui::TextWrapped("Calibration: %s",runtime.calibration.running()?runtime.calibration.status():
+        !cameraFresh?"WAITING FOR FRESH CAMERA":view==-2?"AMBIGUOUS CAMERA":!lensMatches?
+        "MEASURE CURRENT VIEW IN GUIDED SETUP":aim_assist::viewLabel(view).c_str());
+    ImGui::TextDisabled("Saved zoom profiles: %d",int(savedScopes));
+    if(cameraFresh && view>0){
+        const auto measured=aim_assist::calibrationFor(config,view);
+        ImGui::TextDisabled("Measured: %d counts / %.0f ms",measured.commandLimit,measured.responseMs);
+    }
     const auto& device=trigger::motionFeedback();
-    ImGui::TextWrapped("Output: %s",!config.enabled?"DISABLED":runtime.calibration.running()?"SETUP - following paused":config.dryRun?"DRY RUN - no tracking movements":
-        !cameraFresh?"WAITING FOR CAMERA DATA":!calibrated?"BLOCKED - setup required":!lensMatches?"PAUSED - return to measured zoom":
+    ImGui::TextWrapped("Output: %s",!config.enabled?"DISABLED":runtime.calibration.running()?"SETUP - following paused":
+        !cameraFresh?"WAITING FOR CAMERA DATA":!lensMatches?"PAUSED - no matching calibration":config.dryRun?"DRY RUN - no tracking movements":
         device.fault||device.paused?device.note:device.restoring?"CHECKING DEVICE - saved calibration":
         !device.verified?"BLOCKED - device not verified this connection":
-        !config.outputVerified?"BLOCKED - calibration not verified":"ARMED - hold key to follow");
+        "ARMED - hold key to follow");
+    ImGui::TextDisabled("Ballistics: NO BALLISTIC DATA");
     ImGui::TextDisabled("Proposal %+d / %+d",live.proposed.x,live.proposed.y);
     if(live.trackingLeadMs>0)ImGui::TextDisabled("Movement prediction: %.0f ms ahead",live.trackingLeadMs);
-    else ImGui::TextDisabled("Movement prediction: %s",config.motionPrediction?"waiting for stable motion":"off");
+    else ImGui::TextDisabled("Movement prediction: %s",(scoped?config.scoped.motionPrediction:config.motionPrediction)?"waiting for stable motion":"off");
     ImGui::PushTextWrapPos(0.f);ImGui::TextDisabled("%s",runtime.outputStatus);ImGui::PopTextWrapPos();
     ImGui::EndChild();
     for(int slot=0;slot<2;++slot)if(config.key && trigger::binding(slot).key==config.key)ImGui::TextWrapped("Also assigned to trigger %s. Its click conditions stay unchanged.",slot?"Secondary":"Primary");
     if(config.key && config.key==esp.clutch.key)ImGui::TextWrapped("Also assigned to Clutch Mode.");
-    static bool setupOpen=false,advancedOpen=false;
+    static bool setupOpen=false,advancedOpen=false,resumeLive=false;
     if(chip(setupOpen?"Einrichtung schliessen":"Gefuehrt einrichten",setupOpen,ImGui::GetContentRegionAvail().x)) {
         setupOpen=!setupOpen;if(!setupOpen && runtime.calibration.running())esp.assistSetupCancel=true;
     }
     if(setupOpen){
+        const int slot=aim_assist::measurementSlot(config,runtime.camera,scopedTab);
         ImGui::TextWrapped("Die Einrichtung misst beide Mausachsen automatisch. Am Gaming-PC still stehen, ungefaehr geradeaus schauen und Maus/Tasten loslassen. Kein Klick wird durch die Einrichtung gesendet.");
-        ImGui::TextWrapped("%s",runtime.calibration.status());
+        ImGui::TextWrapped("%s",runtime.calibration.complete()?"Messung gespeichert":runtime.calibration.status());
+        if(cameraFresh && slot>=0){
+            const auto title=aim_assist::viewLabel(slot);
+            ImGui::TextWrapped("%s: %s",aim_assist::usableView(aim_assist::calibrationFor(config,slot))?
+                "Erneut messen":"Neu messen",title.c_str());
+        }
         if(runtime.calibration.running()){
-            ImGui::ProgressBar(float(runtime.calibration.progress())/16.f,ImVec2(-1,0));
+            ImGui::ProgressBar(float(runtime.calibration.progress())/float(runtime.calibration.totalSteps()),ImVec2(-1,0));
             if(chip("Abbrechen (Esc)",false,ImGui::GetContentRegionAvail().x))esp.assistSetupCancel=true;
         } else {
-            const bool canStart=cameraFresh && runtime.hotkey.ready && !runtime.hotkey.binding && !clutch::runtime().binding && trigger::motionSetupAvailable();
+            if(scopedTab)ImGui::TextWrapped("Measure the zoom currently shown in game. Use toggle ADS to release the mouse button.");
+            else ImGui::TextWrapped("Measure with the weapon out of ADS.");
+            if(slot<0 && cameraFresh)ImGui::TextWrapped("The current view cannot be measured from this tab.");
+            const bool canStart=slot>=0 && cameraFresh && runtime.hotkey.ready && !runtime.hotkey.binding && !clutch::runtime().binding && trigger::motionSetupAvailable();
             ImGui::BeginDisabled(!canStart);
-            if(chip("Messung starten...",false,ImGui::GetContentRegionAvail().x))ImGui::OpenPopup("Messung bestaetigen");
+            if(chip("Messung starten...",false,ImGui::GetContentRegionAvail().x)){
+                resumeLive=!config.dryRun;
+                ImGui::OpenPopup("Messung bestaetigen");
+            }
             ImGui::EndDisabled();
             if(!canStart)ImGui::TextWrapped("Start benoetigt laufende Erfassung, frische Kamera, Main-PC-Input und freien MAKCU-Abfragekanal. Keine Tasten binden oder halten.");
         }
         if(ImGui::BeginPopupModal("Messung bestaetigen",nullptr,ImGuiWindowFlags_AlwaysAutoResize)){
-            ImGui::TextUnformatted("Jetzt werden 16 kleine Mausbewegungen gemessen.\nAm Gaming-PC still stehen und die Maus nicht bewegen.\nEscape oder Abbrechen beendet weitere Messschritte.\nDry Run bleibt danach aktiv.");
-            if(ImGui::Button("Jetzt messen")){config.enabled=true;config.dryRun=true;changed=true;esp.assistSetupStart=true;ImGui::CloseCurrentPopup();}
+            ImGui::TextUnformatted("Am Gaming-PC still stehen und die Maus nicht bewegen.\nEscape oder Abbrechen beendet die Messung.");
+            if(slot>0)ImGui::TextUnformatted("Die Messung gleicht das Schwanken des Scopes mit Kontrollphasen ab.");
+            ImGui::Checkbox("Live-Ausgabe nach erfolgreicher Messung",&resumeLive);
+            if(ImGui::Button("Jetzt messen")){
+                config.enabled=true;config.dryRun=true;config.setupScoped=scopedTab;
+                changed=true;esp.assistSetupStart=true;esp.assistSetupResumeLive=resumeLive;ImGui::CloseCurrentPopup();
+            }
             ImGui::SameLine();if(ImGui::Button("Zurueck"))ImGui::CloseCurrentPopup();
             ImGui::EndPopup();
         }
-        ImGui::TextDisabled("X %.2f / Y %.2f counts/rad",config.countsX,config.countsY);
-        if(chip("Kalibrierung zuruecksetzen",false,ImGui::GetContentRegionAvail().x))esp.assistSetupReset=true;
+        if(config.enabled && config.dryRun && cameraFresh && lensMatches && !runtime.calibration.running()){
+            const bool held=runtime.hotkey.active || (remote.pid && dma_keyboard::validKey(unsigned(config.key)) &&
+                dma_keyboard::down(remote.bits,unsigned(config.key)));
+            ImGui::BeginDisabled(!runtime.hotkey.ready || runtime.hotkey.binding || held);
+            if(chip("Live-Ausgabe einschalten",false,ImGui::GetContentRegionAvail().x)){config.dryRun=false;changed=true;}
+            ImGui::EndDisabled();
+        }
+        const int resetSlot=scopedTab?view:0;
+        const auto measured=aim_assist::calibrationFor(config,resetSlot);
+        ImGui::TextDisabled("%s",aim_assist::usableView(measured) && (!scopedTab || (cameraFresh && view>0))?
+            "Calibration saved":"No saved calibration for this view");
+        ImGui::BeginDisabled(scopedTab && (!cameraFresh || view<=0));
+        if(chip("Kalibrierung zuruecksetzen",false,ImGui::GetContentRegionAvail().x)){
+            config.setupScoped=scopedTab;changed=true;esp.assistSetupReset=true;
+        }
+        ImGui::EndDisabled();
     }
     if(chip(advancedOpen?"Erweitert schliessen":"Erweiterte Einstellungen",advancedOpen,ImGui::GetContentRegionAvail().x))advancedOpen=!advancedOpen;
     if(advancedOpen) {
-        slider("##range",config.maxRange,1,1000,"range %.0f m");
-        slider("##speed",config.maxSpeed,1,2000,"speed %.0f counts/s");
-        slider("##accel",config.maxAccel,1,20000,"acceleration %.0f counts/s2");
-        slider("##deadzone",config.deadzonePx,0,20,"deadzone %.2f px");
-        ImGui::TextDisabled("Lens %.5f / %.5f",config.lensX,config.lensY);
+        slider("##range",tuning.maxRange,1,1000,"range %.0f m");
+        slider("##speed",tuning.maxSpeed,1,2000,"speed %.0f counts/s");
+        slider("##accel",tuning.maxAccel,1,20000,"acceleration %.0f counts/s2");
+        slider("##deadzone",tuning.deadzonePx,0,20,"deadzone %.2f px");
+        ImGui::TextDisabled("Camera lens %.5f / %.5f",runtime.camera.px,runtime.camera.py);
         ImGui::PushTextWrapPos(0.f);
-        ImGui::TextDisabled("Calibration is measured, not guessed. Zoom changes pause movement. A reconnect requires guided device verification. Physical mouse input is never locked.");
+        ImGui::TextDisabled("Unmatched or ambiguous views pause output. Scope projection must align with the visible game view.");
         ImGui::TextDisabled("Only onscreen/freshness and existing friend checks are available; onscreen does not prove line of sight.");
         ImGui::PopTextWrapPos();
         ImGui::TextWrapped("Human players in snapshot: %u",live.diagnostics.players);
@@ -1485,9 +1545,26 @@ void drawTriggerBindings(bool& ch, const char* scope) {
         if (chip("Clear", false, 52.f)) { trigger::clearBinding(slot); ch = true; }
         ImGui::EndDisabled();
         ImGui::TextDisabled("%s%s", trigger::keySourceLabel(slot), trigger::live().boundHeld[size_t(slot)] ? " - HELD" : "");
+        const auto bind=trigger::binding(slot);
+        if (trigger::remoteKeysOverLan() && dma_keyboard::validKey(unsigned(bind.key)) &&
+            (bind.source==trigger::InputSource::MainPc || (bind.source==trigger::InputSource::Legacy && trigger::cfg().keyRemote))) {
+            const auto counts=trigger::remoteSample().edges[unsigned(bind.key)];
+            ImGui::TextDisabled("LAN edges: %u down / %u up", counts.pressed, counts.released);
+        }
         ImGui::PopID();
     }
     ImGui::TextDisabled("Hold either bind. Esc cancels binding; Clear removes it.");
+    const auto& config = trigger::cfg();
+    const bool needsRemoteInput = trigger::capturing() ||
+        (config.key && (config.keySource == trigger::InputSource::MainPc ||
+            (config.keySource == trigger::InputSource::Legacy && config.keyRemote))) ||
+        (config.secondary.key && config.secondary.source == trigger::InputSource::MainPc);
+    if (needsRemoteInput) {
+        if (trigger::remoteKeysOverLan()) ImGui::TextDisabled("Main-PC input: LAN");
+        else if (trigger::remoteKeysReady()) ImGui::TextDisabled("Main-PC input: PCIe");
+        else ImGui::TextWrapped("Main-PC input unavailable. See [input] in HirschgangWare.log.");
+    }
+    ImGui::TextDisabled("%s", lan_keyboard::status());
     ImGui::PopID();
 }
 
@@ -1616,9 +1693,6 @@ void drawTriggerWindow(bool& ch) {
                 if (switchRow("accept the key on this PC", &fromLoc)) { tc.keyFromLocal = fromLoc; trigger::touch(); }
             }
         }
-        if (trigger::capturing() || tc.keySource == trigger::InputSource::MainPc || tc.secondary.source == trigger::InputSource::MainPc ||
-            (tc.keySource == trigger::InputSource::Legacy && tc.keyRemote))
-            ImGui::TextDisabled("PCIe input: %s", trigger::remoteKeysReady() ? "connected" : "disconnected");
         ImGui::Text("Received presses: %llu", static_cast<unsigned long long>(trigger::live().keyPresses));
         bool po = tc.playersOnly;
         if (switchRow("Target: players only", &po)) { tc.playersOnly = po; trigger::touch(); }
@@ -1758,6 +1832,13 @@ void drawSettingsBody(Config& cfg, const Counts& n, bool live, const std::vector
         const char* clutchStatus = e.clutchBinding ? "BINDING" : e.clutchActive ? "ACTIVE" : e.clutchReady ? "READY" : "NO INPUT";
         ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(e.clutchActive ? th::Accent : th::Text), "%s", clutchStatus);
         ImGui::PushTextWrapPos(0.f);
+        if (e.clutchOverLan && !e.clutchBinding && e.clutch.key) {
+            ImGui::TextDisabled("Main PC LAN: %s (%u down / %u up)", e.clutchKeyHeld ? "HELD" : "RELEASED",
+                                e.clutchEdges.pressed, e.clutchEdges.released);
+        } else if (e.clutchReady && !e.clutchOverLan) {
+            ImGui::TextDisabled("Main PC PCIe");
+        }
+        if (e.clutchOverLan) ImGui::TextDisabled("LAN hotkeys must be listed in the sender configuration.");
         ImGui::TextDisabled("Gaming-PC keyboard only. Esc cancels. End / F8 reserved.");
         ImGui::PopTextWrapPos();
         for (int slot=0;slot<2;++slot) if (e.clutch.key && trigger::binding(slot).key==e.clutch.key)
@@ -1820,6 +1901,25 @@ void drawSettingsBody(Config& cfg, const Counts& n, bool live, const std::vector
             if (ImGui::ColorEdit3("Color", rgb, ImGuiColorEditFlags_DisplayHex | ImGuiColorEditFlags_Uint8)) {
                 e.crosshairColor = RGB(int(rgb[0] * 255.f + 0.5f), int(rgb[1] * 255.f + 0.5f), int(rgb[2] * 255.f + 0.5f));
                 ch = true;
+            }
+            if (e.fullscreenDma) {
+                ImGui::SeparatorText("Fuser alignment");
+                ch |= switchRow("Show alignment guides", &e.showAlignmentGuides);
+                const auto adjust = [&](const char* label, int& stored, int low, int high) {
+                    float percent = float(stored) / 100.f;
+                    ImGui::SetNextItemWidth(122.f);
+                    if (ImGui::DragFloat(label, &percent, 0.05f, float(low) / 100.f, float(high) / 100.f,
+                                         "%.2f%%", ImGuiSliderFlags_AlwaysClamp)) {
+                        stored = int(std::lround(percent * 100.f));
+                        ch = true;
+                    }
+                };
+                using namespace overlay_viewport;
+                adjust("Horizontal offset", e.videoAlignment.x, -kMaxOffset, kMaxOffset);
+                adjust("Vertical offset", e.videoAlignment.y, -kMaxOffset, kMaxOffset);
+                adjust("Width", e.videoAlignment.width, kMinScale, kMaxScale);
+                adjust("Height", e.videoAlignment.height, kMinScale, kMaxScale);
+                if (ImGui::Button("Reset alignment")) { e.videoAlignment = {}; ch = true; }
             }
             ImGui::EndPopup();
         }

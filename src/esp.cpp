@@ -37,6 +37,7 @@
 #include "esp_launcher.h"
 #include "image.h"
 #include "friends.h"
+#include "lan_keyboard.h"
 #include "loot.h"
 #include "overlay_motion.h"
 #include "player_identity.h"
@@ -134,6 +135,7 @@ std::unique_ptr<GpuRenderer> gGpu;
 int gGpuFails = 0;
 HWND gOverlay = nullptr, gGame = nullptr;
 RECT gView{};
+RECT gOutputView{};
 std::vector<Box> gBoxes;
 std::vector<trigger::Cand> gDzTriggerRegions;
 int gFps = 0;
@@ -422,6 +424,7 @@ bool placeOverlay() {
     ClientToScreen(gGame, &tl);
     SetWindowPos(gOverlay, HWND_TOPMOST, tl.x, tl.y, rc.right, rc.bottom, SWP_NOACTIVATE | SWP_SHOWWINDOW);
     gView = {0, 0, rc.right, rc.bottom};
+    gOutputView = gView;
     return true;
 }
 
@@ -429,10 +432,13 @@ bool placeDmaView() {
     RECT rc{};
     if (!GetClientRect(gOverlay, &rc) || rc.right <= 0 || rc.bottom <= 0) {
         gView = {};
+        gOutputView = {};
         return false;
     }
-    // The fuser combines full video frames. The lens does not resize the output.
-    gView = rc;
+    gOutputView = rc;
+    // All projected geometry uses this same video viewport. The lens and the
+    // physical overlay window keep their original sizes.
+    gView = gSettings.fullscreen ? overlay_viewport::projectInto(rc, gSettings.videoAlignment) : rc;
     return true;
 }
 
@@ -893,9 +899,12 @@ struct DzCamShare {
     uint64_t tUs = 0;
     uint64_t tChangeUs = 0;
     Vec3 omega{}, vel{};
+    uint64_t source = 0;
 };
 std::mutex gDzCamMx;
 DzCamShare gDzCamShare;
+dayz_camera::VisualProjection gDzVisualProjection;
+double gDzAssistDrawRadiusPx=0;
 
 bool dzMaybeVisible(const dz::Cam& c, const Vec3& feet) {
     constexpr float kR = 1.5f;
@@ -2235,7 +2244,7 @@ void dzCamLoop() {
                 omega = vel = Vec3{};
             }
             std::lock_guard<std::mutex> lk(gDzCamMx);
-            gDzCamShare = DzCamShare{c, world, t0, prevChangeUs, omega, vel};
+            gDzCamShare = DzCamShare{c, world, t0, prevChangeUs, omega, vel, active};
         }
         next += period;
         const uint64_t now = qpcUs();
@@ -2764,7 +2773,10 @@ void saveSettingsSoon();
 void updateAimAssist(const DzSnap& snap,const DzCamShare& camera) {
     auto& runtime=aim_assist::runtime();
     runtime.camera=camera.c;runtime.cameraAt=camera.tUs;
-    const auto config=aim_assist::validated(gSettings.assist);
+    const auto stored=aim_assist::validated(gSettings.assist);
+    const int view=aim_assist::activeView(stored,camera.c);
+    const auto config=aim_assist::forView(stored,view,aim_assist::scopedView(stored,camera.c,view));
+    gDzAssistDrawRadiusPx=config.radiusPx;
     aim_assist::Frame frame;
     frame.now=qpcUs();frame.session=snap.world;frame.cameraAt=camera.tUs;frame.camera=camera.c;
     frame.width=gView.right-gView.left;frame.height=gView.bottom-gView.top;
@@ -2781,7 +2793,8 @@ void updateAimAssist(const DzSnap& snap,const DzCamShare& camera) {
     frame.diagnostics=&runtime.diagnostics;
     const auto& feedback=trigger::motionFeedback();
     if(runtime.outputCycle.pending()){
-        if(runtime.outputCycle.update(frame.camera,frame.cameraAt,frame.now,frame.session)){
+        const bool multiView=std::any_of(stored.extraViews.begin(),stored.extraViews.end(),aim_assist::usableView);
+        if(runtime.outputCycle.update(frame.camera,frame.cameraAt,frame.now,frame.session,multiView)){
             trigger::completeMotionInterval(frame.now);
         }
         else if(runtime.outputCycle.failed()){
@@ -2806,6 +2819,7 @@ void updateAimAssist(const DzSnap& snap,const DzCamShare& camera) {
     } else if(feedback.paused)runtime.outputCycle.resetReleaseObservation();
     aim_assist::Calibration::Input measurement;
     measurement.now=frame.now;measurement.session=frame.session;measurement.cameraAt=frame.cameraAt;measurement.camera=frame.camera;
+    measurement.cameraSource=camera.source;
     measurement.device=trigger::motionSetupAvailable();measurement.idle=feedback.idleFresh(frame.now);
     measurement.idleAt=feedback.at;measurement.fault=feedback.fault;measurement.generation=feedback.generation;
     measurement.cameraOnly=feedback.cameraOnly;
@@ -2815,32 +2829,46 @@ void updateAimAssist(const DzSnap& snap,const DzCamShare& camera) {
         trigger::motionPhysicalBusy() || trigger::live().keyHeld || (GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0;
     if(runtime.calibrationStart){
         runtime.calibrationStart=false;runtime.calibrationApplied=false;
-        const bool opened=trigger::beginMotionSetup();
+        runtime.measuringView=aim_assist::measurementSlot(stored,frame.camera,stored.setupScoped);
+        const bool opened=runtime.measuringView>=0 && trigger::beginMotionSetup();
         runtime.outputCycle.reset();
         measurement.device=opened;measurement.generation=trigger::motionFeedback().generation;
         measurement.idle=false;measurement.fault=false;
         measurement.cameraOnly=false;
+        measurement.compensateDrift=runtime.measuringView>0;
         runtime.calibration.start(measurement);
-        if(!runtime.calibration.running())trigger::endMotionSetup(false);
+        if(!runtime.calibration.running()){
+            runtime.resumeLiveAfterSetup=false;
+            trigger::endMotionSetup(false);
+        }
     }
     const bool measuring=runtime.calibration.running();
     if(measuring){
         const auto previousStep=runtime.calibration.progress();
         const auto command=runtime.calibration.tick(measurement);
-        if(feedback.cameraOnly && runtime.calibration.progress()>previousStep)trigger::completeMotionInterval(frame.now,true);
-        if(command.x||command.y)runtime.calibration.submitted(trigger::calibrationMove(command.x,command.y,frame.now+5000),measurement);
+        if(feedback.cameraOnly && runtime.calibration.progress()>previousStep)
+            trigger::completeMotionInterval(frame.now,!runtime.calibration.usesScopeSequence());
+        if(command.x||command.y)runtime.calibration.submitted(trigger::calibrationMove(
+            command.x,command.y,frame.now+5000,runtime.calibration.usesScopeSequence()),measurement);
         if(!runtime.calibration.running()){
             if(runtime.calibration.complete()){
                 const auto& result=runtime.calibration.result();
-                gSettings.assist.countsX=result.countsX;gSettings.assist.countsY=result.countsY;
-                gSettings.assist.lensX=result.lensX;gSettings.assist.lensY=result.lensY;
-                gSettings.assist.responseMs=double(result.responseUs)/1000.;
-                gSettings.assist.outputVerified=true;gSettings.assist.dryRun=true;
+                aim_assist::saveView(gSettings.assist,runtime.measuringView,{result.countsX,result.countsY,
+                    result.lensX,result.lensY,double(result.responseUs)/1000.,result.commandLimit});
+                logLine("[assist-profile] slot=%d lens=%.6f/%.6f counts=%.6f/%.6f responseMs=%.1f stepLimit=%d",
+                    runtime.measuringView,result.lensX,result.lensY,result.countsX,result.countsY,
+                    double(result.responseUs)/1000.,result.commandLimit);
+                const bool resumeLive=aim_assist::resumeMeasuredView(gSettings.assist,frame.camera,
+                    runtime.measuringView,runtime.resumeLiveAfterSetup);
+                gSettings.assist.dryRun=!resumeLive;
+                if(resumeLive){runtime.hotkey.reset();runtime.engine.reset();}
                 runtime.calibrationApplied=true;saveSettingsSoon();
             }
-            logLine("[assist-setup] %s; steps=%u device=%s legacyCamera=%d responseMs=%.1f",
-                runtime.calibration.status(),runtime.calibration.progress(),feedback.note,int(feedback.cameraOnly),
-                double(runtime.calibration.observedResponseUs())/1000.);
+            logLine("[assist-setup] %s; profile=%s steps=%u device=%s legacyCamera=%d responseMs=%.1f dryRun=%d",
+                runtime.calibration.complete()?"Calibration measured and saved":runtime.calibration.status(),
+                aim_assist::viewLabel(runtime.measuringView).c_str(),runtime.calibration.progress(),feedback.note,int(feedback.cameraOnly),
+                double(runtime.calibration.observedResponseUs())/1000.,int(gSettings.assist.dryRun));
+            runtime.resumeLiveAfterSetup=false;
             trigger::endMotionSetup(runtime.calibration.complete());
         }
     }
@@ -2854,14 +2882,14 @@ void updateAimAssist(const DzSnap& snap,const DzCamShare& camera) {
     frame.outputIssue=(feedback.fault||feedback.paused)?feedback.note:feedback.restoring?"CHECKING DEVICE - saved calibration":
         !feedback.verified?"OUTPUT BLOCKED - device not verified":
         !config.outputVerified?"OUTPUT BLOCKED - calibration not verified":nullptr;
-    frame.commandLimit=feedback.cameraOnly?16:127;
+    frame.commandLimit=feedback.cameraOnly?config.cameraCommandLimit:127;
     const auto live=runtime.engine.update(config,frame);
     static uint64_t lastDiagnostic=0;
     if(config.enabled && frame.held && frame.now-lastDiagnostic>=1000000) {
         lastDiagnostic=frame.now;
         const auto& d=live.diagnostics;
-        logLine("[assist] %s; target=%llu error=%.1fpx range=%.1fm lead=%.1fms players=%u ready=%u identityPending=%u friends=%u noBones=%u staleRoot=%u staleBones=%u offscreen=%u rangeRejected=%u circleRejected=%u calibration=%d dryRun=%d verified=%d paused=%d fault=%d",
-            live.status,static_cast<unsigned long long>(live.target),live.errorPx,live.range,live.trackingLeadMs,d.players,
+        logLine("[assist] %s; profile=%d target=%llu error=%.1fpx correction=%.1fpx range=%.1fm lead=%.1fms players=%u ready=%u identityPending=%u friends=%u noBones=%u staleRoot=%u staleBones=%u offscreen=%u rangeRejected=%u circleRejected=%u calibration=%d dryRun=%d verified=%d paused=%d fault=%d",
+            live.status,view,static_cast<unsigned long long>(live.target),live.errorPx,live.correctionPx,live.range,live.trackingLeadMs,d.players,
             d.get(aim_assist::Rejection::Ready),d.get(aim_assist::Rejection::IdentityPending),d.get(aim_assist::Rejection::Friend),
             d.get(aim_assist::Rejection::NoBones),d.get(aim_assist::Rejection::StaleRoot),d.get(aim_assist::Rejection::StaleBones),
             d.get(aim_assist::Rejection::Offscreen),d.get(aim_assist::Rejection::Range),d.get(aim_assist::Rejection::Area),
@@ -2873,12 +2901,12 @@ void updateAimAssist(const DzSnap& snap,const DzCamShare& camera) {
             const bool sent=trigger::moveRelative(live.proposed.x,live.proposed.y,frame.now+5000,config.outputVerified);
             runtime.outputStatus=sent?"relative movement submitted":"movement dropped (click priority, feedback, capture, expiry or device)";
             if(sent && trigger::cfg().showDebug){
-                logLine("[assist-move] t=%llu counts=%+d,%+d error=%.1fpx lead=%.1fms smoothing=%.0fms",
+                logLine("[assist-move] t=%llu counts=%+d,%+d error=%.1fpx correction=%.1fpx lead=%.1fms smoothing=%.0fms",
                     static_cast<unsigned long long>(frame.now),live.proposed.x,live.proposed.y,
-                    live.errorPx,live.trackingLeadMs,config.smoothMs);
+                    live.errorPx,live.correctionPx,live.trackingLeadMs,config.smoothMs);
             }
             if(sent && feedback.cameraOnly)runtime.outputCycle.start(frame.camera,frame.now,frame.session,
-                live.proposed.x,live.proposed.y,config.countsX,config.countsY,config.responseMs);
+                live.proposed.x,live.proposed.y,config.countsX,config.countsY,config.responseMs,frame.commandLimit);
         }
     } else runtime.outputStatus="no movement pending";
     if(feedback.paused||feedback.fault)runtime.outputStatus=feedback.note;
@@ -2928,15 +2956,21 @@ bool drawDayzFrame() {
     const bool haveViewport = placeDmaView();
     const bool gotCam = haveViewport && recentPose && dayz_camera::validLens(cs.c) &&
         dayz_camera::fresh(cs.tUs, nowUs, dayz_camera::kProjectionMaxAgeUs);
+    const dayz_camera::VisualProjection currentVisual{cs.world,cs.source,cs.tUs,cs.c.px,cs.c.py,
+        gView.left,gView.top,gView.right,gView.bottom};
+    const bool holdingVisual = !gotCam && haveViewport && sameWorld &&
+        gDzVisualProjection.canHold(currentVisual,nowUs);
     if (gotCam) {
         const dz::Cam view = dzViewCam(cs, nowUs);
         projectDz(snap, view, me);
+        gDzVisualProjection = currentVisual;
 #ifndef HIRSCHGANGWARE_NO_DIAG
-        static LONG lastWidth = 0, lastHeight = 0;
-        if (lastWidth != gView.right || lastHeight != gView.bottom) {
-            lastWidth = gView.right;
-            lastHeight = gView.bottom;
-            logLine("[cam] overlay viewport %ldx%ld; lens ratio %.5f", lastWidth, lastHeight, cs.c.px / cs.c.py);
+        static RECT lastView{};
+        if (!EqualRect(&lastView, &gView)) {
+            lastView = gView;
+            logLine("[cam] overlay viewport %ldx%ld at (%ld,%ld) on %ldx%ld output; lens ratio %.5f",
+                    gView.right - gView.left, gView.bottom - gView.top, gView.left, gView.top,
+                    gOutputView.right, gOutputView.bottom, cs.c.px / cs.c.py);
         }
 #endif
 
@@ -2996,9 +3030,12 @@ bool drawDayzFrame() {
         }
 #endif
     } else {
-        gBoxes.clear();
+        if (!holdingVisual) {
+            gBoxes.clear();
+            gDzLootPts.clear();
+            gDzVisualProjection = {};
+        }
         gDzTriggerRegions.clear();
-        gDzLootPts.clear();
 #ifndef HIRSCHGANGWARE_NO_DIAG
         gDzDbgBones.clear();
 #endif
@@ -3025,6 +3062,7 @@ bool drawDayzFrame() {
     else {
         aim_assist::runtime().engine.suspend("CAMERA INVALID/STALE");
         aim_assist::runtime().outputStatus="no movement pending";aim_assist::runtime().cameraAt=0;
+        if(!controlWorld || !haveViewport)gDzAssistDrawRadiusPx=0;
         if((aim_assist::runtime().calibration.running() || aim_assist::runtime().calibrationStart) &&
            aim_assist::calibrationSourceLost(controlNow,controlCamera.tUs,controlWorld && haveViewport)){
             logLine("[assist-setup] Cancelled: sustained camera/world loss (sameWorld=%d ageMs=%.1f)",int(controlWorld),
@@ -3043,13 +3081,14 @@ bool drawDayzFrame() {
     }
 #ifndef HIRSCHGANGWARE_NO_DIAG
     static ULONGLONG lastRlog = lastFps;
-    static unsigned projectionMisses = 0, peakAgeUs = 0;
+    static unsigned projectionMisses = 0, heldVisualFrames = 0, peakAgeUs = 0;
     projectionMisses += !gotCam;
+    heldVisualFrames += holdingVisual;
     if (gotCam) peakAgeUs = std::max(peakAgeUs, unsigned(nowUs - cs.tUs));
     if (now - lastRlog >= 2000) {
-        logLine("[log] render: %d fps, cam %.2f ms, paint %.2f ms, %d boxes; projection misses=%u peak age=%.2f ms regions=%u",
-                gFps, gDzCamMs.load(), gPaintMs, int(gBoxes.size()), projectionMisses, peakAgeUs / 1000.0, trigger::live().regionCount);
-        projectionMisses = peakAgeUs = 0;
+        logLine("[log] render: %d fps, cam %.2f ms, paint %.2f ms, %d boxes; projection misses=%u visual holds=%u peak age=%.2f ms regions=%u",
+                gFps, gDzCamMs.load(), gPaintMs, int(gBoxes.size()), projectionMisses, heldVisualFrames, peakAgeUs / 1000.0, trigger::live().regionCount);
+        projectionMisses = heldVisualFrames = peakAgeUs = 0;
         lastRlog = now;
     }
 #endif
@@ -3352,7 +3391,7 @@ float drawRadarView(Canvas& cv, const RECT& area, const Vec3& c, float R, bool f
 
 void drawDzRadar(Canvas& cv) {
     const int S = std::clamp(gSettings.dzRadarSize, 110, 900);
-    const RECT area{gView.right - S - 16, gView.top + 16, gView.right - 16, gView.top + 16 + S};
+    const RECT area{gOutputView.right - S - 16, gOutputView.top + 16, gOutputView.right - 16, gOutputView.top + 16 + S};
     drawRadarView(cv, area, gDzRadar.me, float(std::max(25, gSettings.dzRadarRange)), false);
     char scale[32];
     std::snprintf(scale, sizeof scale, "%dm", std::max(25, gSettings.dzRadarRange));
@@ -3368,8 +3407,8 @@ void drawScene(Canvas& cv) {
     if (policy.extras() && gSettings.fps) {
         char fps[24];
         std::snprintf(fps, sizeof fps, "%d FPS", gFps);
-        cv.text(fps, {gView.left + 7, gView.top + 7, gView.right, gView.top + 27}, RGB(1, 1, 1), DT_LEFT | DT_TOP);
-        cv.text(fps, {gView.left + 6, gView.top + 6, gView.right, gView.top + 26}, RGB(255, 220, 80), DT_LEFT | DT_TOP);
+        cv.text(fps, {gOutputView.left + 7, gOutputView.top + 7, gOutputView.right, gOutputView.top + 27}, RGB(1, 1, 1), DT_LEFT | DT_TOP);
+        cv.text(fps, {gOutputView.left + 6, gOutputView.top + 6, gOutputView.right, gOutputView.top + 26}, RGB(255, 220, 80), DT_LEFT | DT_TOP);
     }
     for (const auto& b : gBoxes) {
         const bool realBones = b.skel.ok[DJ_Pelvis] && b.skel.ok[DJ_Neck];
@@ -3465,9 +3504,10 @@ void drawScene(Canvas& cv) {
         return;
     }
     if(gDma && gSettings.assist.enabled && gSettings.assist.showArea){
+        const float radius=float(gDzAssistDrawRadiusPx>0?gDzAssistDrawRadiusPx:gSettings.assist.radiusPx);
         cv.pen(RGB(65,170,155),1);
         cv.ellipseF(crosshair::center(gView.left,gView.right),crosshair::center(gView.top,gView.bottom),
-            float(gSettings.assist.radiusPx),float(gSettings.assist.radiusPx));
+            radius,radius);
     }
     if (trigger::cfg().showRegions) {
         const float cx = crosshair::center(gView.left, gView.right), cy = crosshair::center(gView.top, gView.bottom);
@@ -3516,6 +3556,25 @@ void drawScene(Canvas& cv) {
 #endif
 
     drawCrosshair();
+    if (gDma && gSettings.fullscreen && gSettings.showAlignmentGuides &&
+        gView.right > gView.left && gView.bottom > gView.top) {
+        const auto marker = [&](float x, float y, int arm, COLORREF color) {
+            const int px = int(std::lround(x)), py = int(std::lround(y));
+            cv.pen(RGB(1, 1, 1), 5);
+            cv.line(px - arm, py, px + arm, py);
+            cv.line(px, py - arm, px, py + arm);
+            cv.pen(color, 2);
+            cv.line(px - arm, py, px + arm, py);
+            cv.line(px, py - arm, px, py + arm);
+        };
+        const float w = float(gView.right - gView.left), h = float(gView.bottom - gView.top);
+        const float cx = crosshair::center(gView.left, gView.right), cy = crosshair::center(gView.top, gView.bottom);
+        marker(cx, cy, 16, RGB(255, 120, 240));
+        marker(cx - w * 0.4f, cy, 9, RGB(60, 240, 225));
+        marker(cx + w * 0.4f, cy, 9, RGB(60, 240, 225));
+        marker(cx, cy - h * 0.4f, 9, RGB(60, 240, 225));
+        marker(cx, cy + h * 0.4f, 9, RGB(60, 240, 225));
+    }
 }
 
 void paint(HDC hdc, int w, int h) {
@@ -3581,6 +3640,7 @@ void stopEsp() {
     clutch::runtime().cancelBinding();
     gClutchBones.store(false, std::memory_order_relaxed);
     trigger::setRemoteInputNeeded(false);
+    trigger::resetRemoteInput();
     if (gRun == Run::Attaching) {
         if (gCancel) *gCancel = true;
         gRun = Run::Stopping;
@@ -3637,6 +3697,9 @@ void stopEsp() {
     gDzEntBoneUs.clear();
     gDzEntDead.clear();
     { std::lock_guard<std::mutex> lk(gDzCamMx); gDzCamShare = DzCamShare{}; }
+    gDzVisualProjection = {};
+    gDzAssistDrawRadiusPx = 0;
+    gSettings.showAlignmentGuides = false;
     gDzLootVs.clear();
     gDzLootPos.clear();
     gDzLootName.clear();
@@ -3835,6 +3898,13 @@ void syncRadarScreen() {
     cfg.esp.clutchActive = clutch::runtime().active;
     cfg.esp.clutchReady = clutch::runtime().ready;
     cfg.esp.clutchBinding = clutch::runtime().binding;
+    const auto& clutchInput = clutch::runtime().lastInput();
+    cfg.esp.clutchOverLan = clutchInput.pid && clutchInput.transport == dma_keyboard::Transport::Lan;
+    if (cfg.esp.clutchOverLan && clutch::bindable(gSettings.clutch.key)) {
+        const auto key = unsigned(gSettings.clutch.key);
+        cfg.esp.clutchKeyHeld = dma_keyboard::down(clutchInput.bits, key);
+        cfg.esp.clutchEdges = clutchInput.edges[key];
+    }
     cfg.esp.box = gSettings.box;
     cfg.esp.names = gSettings.names;
     cfg.esp.distance = gSettings.info;
@@ -3850,6 +3920,9 @@ void syncRadarScreen() {
     cfg.esp.crosshairSize = gSettings.crosshairSize;
     cfg.esp.crosshairStyle = gSettings.crosshairStyle;
     cfg.esp.crosshairColor = gSettings.crosshairColor;
+    cfg.esp.videoAlignment = gSettings.videoAlignment;
+    cfg.esp.fullscreenDma = gDma && gFull;
+    cfg.esp.showAlignmentGuides = gSettings.showAlignmentGuides;
     cfg.esp.enemyColor = gSettings.enemyColor;
     cfg.animals = gSettings.dzAnimals;
     cfg.vehicles = gSettings.dzVehicles;
@@ -3908,7 +3981,9 @@ void syncRadarScreen() {
     }
     if (cfg.changed) {
         gSettings.clutch = clutch::validated(cfg.esp.clutch);
-        gSettings.assist = aim_assist::validated(cfg.esp.assist);
+        const bool enablingAssistOutput=gSettings.assist.dryRun && !cfg.esp.assist.dryRun;
+        gSettings.assist = aim_assist::applyMenuSettings(gSettings.assist,cfg.esp.assist);
+        if(enablingAssistOutput){aim_assist::runtime().hotkey.reset();aim_assist::runtime().engine.reset();}
         aim_assist::runtime().hotkey.configure({gSettings.assist.enabled,gSettings.assist.key,clutch::Activation::Hold,false});
         clutch::runtime().configure(gSettings.clutch);
         gSettings.dzLoot = cfg.loot;
@@ -3937,6 +4012,8 @@ void syncRadarScreen() {
         gSettings.crosshairSize = cfg.esp.crosshairSize;
         gSettings.crosshairStyle = cfg.esp.crosshairStyle;
         gSettings.crosshairColor = cfg.esp.crosshairColor;
+        gSettings.videoAlignment = overlay_viewport::validated(cfg.esp.videoAlignment);
+        gSettings.showAlignmentGuides = cfg.esp.showAlignmentGuides;
         gSettings.enemyColor = cfg.esp.enemyColor;
         gSettings.dzAnimals = cfg.animals;
         gSettings.dzVehicles = cfg.vehicles;
@@ -3983,13 +4060,23 @@ void syncRadarScreen() {
     }
     if(cfg.esp.assistSetupCancel || cfg.esp.assistSetupReset){
         aim_assist::runtime().calibration.cancel();aim_assist::runtime().calibrationStart=false;
+        aim_assist::runtime().resumeLiveAfterSetup=false;
         trigger::endMotionSetup(false);aim_assist::runtime().engine.reset();
     }
     if(cfg.esp.assistSetupReset){
-        auto& assist=gSettings.assist;assist.countsX=assist.countsY=assist.lensX=assist.lensY=0;
-        assist.outputVerified=false;assist.dryRun=true;aim_assist::runtime().calibration.reset();saveSettingsSoon();
+        auto& assist=gSettings.assist;
+        auto& runtime=aim_assist::runtime();
+        const int slot=assist.setupScoped?aim_assist::activeView(assist,runtime.camera):0;
+        if(!assist.setupScoped || (slot>0 && aim_assist::fresh(runtime.cameraAt,qpcUs(),35000))){
+            aim_assist::saveView(assist,slot,{});
+            assist.dryRun=true;runtime.calibration.reset();saveSettingsSoon();
+        }
     }
-    if(cfg.esp.assistSetupStart && !cfg.esp.assistSetupReset)aim_assist::runtime().calibrationStart=true;
+    if(cfg.esp.assistSetupStart && !cfg.esp.assistSetupReset){
+        auto& runtime=aim_assist::runtime();
+        runtime.resumeLiveAfterSetup=cfg.esp.assistSetupResumeLive;
+        runtime.calibrationStart=true;
+    }
     if (wantShow && !want) {
         gSettings.dzRadarScreen = false;
         saveSettings(gSettings);
@@ -4195,12 +4282,15 @@ void startEsp() {
             }
             if (*cancel) return;
             if (dma) {
+                logLine("[input] PCIe transport: target process attached");
                 const uint64_t before = qpcUs();
                 std::string keyboardDetail;
                 const bool keyboardReady = res->proc->prepareRemoteKeys(keyboardDetail);
-                logLine("[log] PCIe keyboard setup before capture: %s (%.1f ms) %s",
+                logLine("[input] PCIe keyboard setup before capture: %s (%.1f ms) %s",
                         keyboardReady ? "ready" : "unavailable", double(qpcUs() - before) / 1000.0,
                         keyboardDetail.c_str());
+                if (!keyboardReady)
+                    logLine("[input] PCIe keyboard sampling unavailable for this capture session");
             }
             if (*cancel) return;
             Image img;
@@ -4402,7 +4492,6 @@ int main(int argc, char** argv) {
     openLog();
     trigger::setLog([](const char* s) { logLine("%s", s); });
     updateWebmapReaders();
-    trigger::setRemoteKeys([] { return gProc ? gProc->remoteKeySample() : dma_keyboard::Sample{}; });
     installCrashHandlers();
     DeleteFileA((exeDir0() + "\\HirschgangWare_old.exe").c_str());
 #endif
@@ -4432,6 +4521,11 @@ int main(int argc, char** argv) {
         logLine("[-] could not create the panel (error %lu)", GetLastError());
         return 1;
     }
+    trigger::setRemoteKeys([] {
+        const auto pcie = gProc ? gProc->remoteKeySample() : dma_keyboard::Sample{};
+        return pcie.pid ? pcie : lan_keyboard::sample();
+    });
+    lan_keyboard::start(exeDir() + "lan-keyboard-receiver.ini", [](const char* s) { logLine("%s", s); });
 
 #ifndef HIRSCHGANGWARE_NO_DIAG
     bool updating = false;
@@ -4470,12 +4564,24 @@ int main(int argc, char** argv) {
             gClutchBones.store(gSettings.clutch.enabled && clutch::bindable(gSettings.clutch.key), std::memory_order_relaxed);
             auto& assistState=aim_assist::runtime();
             assistState.hotkey.configure({gSettings.assist.enabled,gSettings.assist.key,clutch::Activation::Hold,false});
-            gAssistBoneRange.store(gSettings.assist.enabled && clutch::bindable(gSettings.assist.key) ? int(gSettings.assist.maxRange) : 0,std::memory_order_relaxed);
+            const auto& assist=gSettings.assist;
+            const int assistRange=assist.enabled && clutch::bindable(assist.key)?
+                int(std::ceil(std::max(assist.maxRange,assist.scoped.maxRange))):0;
+            gAssistBoneRange.store(assistRange,std::memory_order_relaxed);
             trigger::setRemoteInputNeeded(gDma && (gSettings.clutch.enabled || clutchState.binding || gSettings.assist.enabled || assistState.hotkey.binding));
             trigger::pollInputs();
-            clutchState.update(gDma ? trigger::remoteSample() : dma_keyboard::Sample{}, gDma,
-                               trigger::capturing(), (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0);
-            assistState.hotkey.update(gDma ? trigger::remoteSample() : dma_keyboard::Sample{},gDma,
+            const auto sharedKeys = trigger::remoteSample();
+            const auto clutchKeys = gSettings.clutch.enabled || clutchState.binding
+                ? clutch::mainPcInput(lan_keyboard::sample(), sharedKeys, gDma) : dma_keyboard::Sample{};
+            const auto clutchKey = unsigned(gSettings.clutch.key);
+            const auto clutchEdges = dma_keyboard::edgesSince(clutchState.lastInput(), clutchKeys, clutchKey);
+            clutchState.update(clutchKeys, true, trigger::capturing(),
+                               (GetAsyncKeyState(VK_ESCAPE) & 0x8000) != 0);
+            if (clutchEdges.pressed || clutchEdges.released) {
+                logLine("[clutch] LAN vk=%u down=+%u up=+%u active=%d", clutchKey, clutchEdges.pressed,
+                        clutchEdges.released, int(clutchState.active));
+            }
+            assistState.hotkey.update(gDma ? sharedKeys : dma_keyboard::Sample{},gDma,
                                      trigger::capturing() || clutchState.binding,(GetAsyncKeyState(VK_ESCAPE)&0x8000)!=0);
             if(assistState.hotkey.boundKey) {
                 gSettings.assist.key=assistState.hotkey.boundKey;
@@ -4485,6 +4591,8 @@ int main(int argc, char** argv) {
             }
             if (clutchState.boundKey) {
                 gSettings.clutch.key = clutchState.boundKey;
+                logLine("[clutch] bound vk=%d source=%s", gSettings.clutch.key,
+                        clutchKeys.transport == dma_keyboard::Transport::Lan ? "LAN" : "PCIe");
                 clutchState.boundKey = 0;
                 clutchState.configure(gSettings.clutch);
                 saveSettingsSoon();
@@ -4496,6 +4604,7 @@ int main(int argc, char** argv) {
         }
     }
     stopEsp();
+    lan_keyboard::stop();
     webmap::shutdown();
     flushSettings(true);
     if (fineTimer) timeEndPeriod(1);

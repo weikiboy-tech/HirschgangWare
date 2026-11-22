@@ -10,6 +10,7 @@
 #include <windows.h>
 #include "../src/clock.h"
 #include "../src/crosshair.h"
+#include "../src/overlay_viewport.h"
 
 #include <array>
 #include <cassert>
@@ -17,6 +18,36 @@
 #include <limits>
 
 using namespace dayz_camera;
+
+void testVideoAlignment() {
+    const RECT full{7,9,1927,1089};
+    const RECT original=overlay_viewport::projectInto(full,{});
+    assert(EqualRect(&full,&original));
+    const RECT odd{5,6,1926,1087};
+    const RECT originalOdd=overlay_viewport::projectInto(odd,{});
+    assert(EqualRect(&odd,&originalOdd));
+    const RECT empty=overlay_viewport::projectInto({},{});
+    assert(IsRectEmpty(&empty));
+
+    const RECT mapped=overlay_viewport::projectInto(full,{500,-1000,9000,11000});
+    assert(mapped.left==199 && mapped.top==-153 && mapped.right==1927 && mapped.bottom==1035);
+    const float cx=crosshair::center(mapped.left,mapped.right);
+    const float cy=crosshair::center(mapped.top,mapped.bottom);
+    assert(cx==1063 && cy==441);
+    for (float lens : {1.f,.20f}) {
+        const Cam camera{{1,0,0},{0,1,0},{0,0,1},{0,0,0},lens,lens*.5625f};
+        float x=0,y=0;
+        assert(toScreen(camera,{0,0,10},float(mapped.right-mapped.left),float(mapped.bottom-mapped.top),x,y));
+        assert(x+mapped.left==cx && y+mapped.top==cy);
+        assert(toScreen(camera,{lens*5,lens*.5625f*5,10},float(mapped.right-mapped.left),
+                        float(mapped.bottom-mapped.top),x,y));
+        assert(std::abs(x + mapped.left - (cx + 432)) < .001f);
+        assert(std::abs(y + mapped.top - (cy - 297)) < .001f);
+        const auto body=trigger_geometry::projectDisc(camera,
+            {float(mapped.left),float(mapped.top),float(mapped.right),float(mapped.bottom)},{0,0,10},.1f);
+        assert(body.valid && body.x==cx && body.y==cy);
+    }
+}
 
 void testBodyRegions() {
     const Cam camera{{1,0,0},{0,1,0},{0,0,1},{0,0,0},1.f,.5625f};
@@ -231,13 +262,22 @@ void testIndependentBindings() {
     }
     // A held key on a newly attached session is not a new press.
     cfg.key = 'E'; cfg.keySource = trigger::InputSource::MainPc; cfg.secondary = {};
+    const auto pressesBeforeReconnect = trigger::live().keyPresses;
     inputSample.pid = 43; remoteKey('E', true); inputStep();
-    assert(!trigger::live().keyHeld);
+    assert(!trigger::live().keyHeld && trigger::live().keyPresses == pressesBeforeReconnect);
     remoteKey('E', false); inputStep(); remoteKey('E', true); inputStep();
-    assert(trigger::live().keyHeld);
+    assert(trigger::live().keyHeld && trigger::live().keyPresses == pressesBeforeReconnect + 1);
     inputSample.pid = 0; inputStep();
+    assert(!trigger::remoteKeysReady() && !trigger::live().keyHeld);
+    inputSample.pid = 44; inputStep(); // E is still held when the new session arrives.
+    assert(trigger::remoteKeysReady() && !trigger::live().keyHeld);
+    remoteKey('E', false); inputStep();
+    remoteKey('E', true); inputStep();
+    assert(trigger::live().keyHeld && trigger::live().keyPresses == pressesBeforeReconnect + 2);
+    inputStep(); // Holding E must not create another press.
+    assert(trigger::live().keyHeld && trigger::live().keyPresses == pressesBeforeReconnect + 2);
+    remoteKey('E', false); inputStep();
     assert(!trigger::live().keyHeld);
-    inputSample.pid = 44; inputSample.bits = {}; inputStep();
     cfg.secondary = {'Q', 0, trigger::InputSource::SecondPc};
     trigger::startCapture(1); inputStep(); remoteKey('W', true); inputStep();
     assert(!trigger::capturing() && cfg.secondary.key == 'W' && cfg.key == 'E');
@@ -280,6 +320,21 @@ void testIndependentBindings() {
 }
 
 int main() {
+    testVideoAlignment();
+    const VisualProjection lastDraw{1,2,1000000,1.28f,.72f,0,0,1920,1080};
+    auto current=lastDraw;
+    assert(!fresh(current.at,1035000,kProjectionMaxAgeUs));
+    assert(lastDraw.canHold(current,1035000));
+    assert(lastDraw.canHold(current,1105000)); // Observed DMA stalls lasted about 105 ms.
+    assert(!lastDraw.canHold(current,1120000));
+    current.at+=1000;
+    assert(lastDraw.canHold(current,1105000));
+    assert(!lastDraw.canHold(current,1120000)); // Late samples do not renew the cached drawing.
+    current.source=3;assert(!lastDraw.canHold(current,1050000));current=lastDraw;
+    current.world=3;assert(!lastDraw.canHold(current,1050000));current=lastDraw;
+    current.lensX=.2f;assert(!lastDraw.canHold(current,1050000));current=lastDraw;
+    current.right=2560;assert(!lastDraw.canHold(current,1050000));
+    assert(!lastDraw.canHold({},1050000));
     testIndependentBindings();
     testBodyRegions();
     const uint64_t sample = 1000000;
